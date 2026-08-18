@@ -92,14 +92,25 @@ def _decrypt(blob: bytes, key: bytes, *, associated: bytes) -> bytes:
 
 
 class PayloadStore:
-    """Sensitive values, addressable by id, destroyable without touching the chain."""
+    """Sensitive values, addressable by id, destroyable without touching the chain.
 
-    def __init__(self, root: Path | str) -> None:
+    A ``schedule`` turns ``retention_class`` from a label into a control: with
+    one supplied, destruction before the stated period has elapsed is refused.
+    Without one the store behaves as before, which keeps the retention decision
+    an explicit choice rather than a default someone inherits.
+    """
+
+    def __init__(self, root: Path | str, *, schedule: Any = None,
+                 clock: Any = None) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "keys").mkdir(exist_ok=True)
         (self.root / "blobs").mkdir(exist_ok=True)
         self._holds: set[str] = set()
+        self._schedule = schedule
+        self._clock = clock or (lambda: __import__("time").time())
+        self._created: dict[str, float] = {}
+        self._retention: dict[str, str] = {}
 
     # -- writing ------------------------------------------------------------
 
@@ -112,6 +123,8 @@ class PayloadStore:
         key = AESGCM.generate_key(bit_length=256)
         body = dumps(value).encode("utf-8")
 
+        self._created[payload_id] = self._clock()
+        self._retention[payload_id] = retention_class
         (self.root / "keys" / payload_id).write_bytes(key)
         (self.root / "blobs" / payload_id).write_bytes(
             _encrypt(body, key, associated=payload_id.encode("ascii"))
@@ -162,7 +175,21 @@ class PayloadStore:
         The caller appends the returned event; this function does not touch the
         chain, which is what keeps erasure from invalidating it.
         """
-        if self.on_hold(reference.payload_id):
+        if self._schedule is not None:
+            # The schedule owns both questions, including the legal hold, so the
+            # two rules cannot drift apart into contradicting each other.
+            created_at = self._created.get(reference.payload_id, 0.0)
+            try:
+                self._schedule.require_destroyable(
+                    reference.payload_id,
+                    retention_class=self._retention.get(
+                        reference.payload_id, reference.retention_class),
+                    created_at=created_at,
+                    on_hold=self.on_hold(reference.payload_id),
+                )
+            except Exception as error:
+                raise PayloadError(str(error)) from error
+        elif self.on_hold(reference.payload_id):
             raise PayloadError(
                 f"payload {reference.payload_id} is under legal hold and cannot be destroyed"
             )
@@ -190,6 +217,17 @@ class PayloadStore:
             "requester": requester,
             "reason": reason,
         }
+
+    def pending_retention(self) -> list[dict[str, Any]]:
+        """What a sweep needs: every live payload with its class and age."""
+        return [
+            {"payload_id": payload_id,
+             "retention_class": self._retention.get(payload_id, "standard"),
+             "created_at": created_at,
+             "on_hold": self.on_hold(payload_id)}
+            for payload_id, created_at in sorted(self._created.items())
+            if self.exists(payload_id)
+        ]
 
 
 def redact(value: Mapping[str, Any], *, secret_keys: tuple[str, ...]) -> tuple[dict[str, Any], tuple[str, ...]]:

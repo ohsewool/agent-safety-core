@@ -33,6 +33,7 @@ core/checkpoint.py  Ed25519 서명 + 외부 witness — 롤백·포크 탐지
 core/payload.py     민감값 분리 저장(AES-256-GCM) — 삭제해도 감사 체인이 깨지지 않음
 core/access.py      역할·권한 분리 — 자기 승인 금지, 감사자와 파기 권한 분리
 core/verification.py 후조건 검증 — 되묻지 않고 세계 상태를 관찰해 UNKNOWN 해소
+core/retention.py   보존 기간 — 라벨이 아니라 강제되는 규칙, legal hold가 우선
 profiles/kr_ai_act/ 한국 AI 기본법 조항 → 런타임 증적 매핑
 profiles/ap2/       결제 vertical — 벤치마크의 주장을 실제 코어 위에서 재현
 adapters/           기존 도구를 감싸 코어의 규칙 아래로 넣는 최소 표면
@@ -40,7 +41,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 239 tests
+python3 -m pytest tests/ -q          # 273 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -115,7 +116,6 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 
 ## 남은 작업
 
-- 장기 보존 정책 연동
 - 외부 witness의 배포 형태 결정 (transparency log / 객체 스토리지 버저닝 / 제3자)
 
 근거 문서: `docs/ADR-001`, `docs/ADR-002`, `docs/threat-model-and-non-goals.md`, `benchmark/README.md`.

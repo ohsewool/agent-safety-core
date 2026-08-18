@@ -187,3 +187,82 @@ class TestAuthenticatedEncryption:
         first = store.put(SENSITIVE)
         second = store.put(SENSITIVE)
         assert (blobs / first.payload_id).read_bytes() != (blobs / second.payload_id).read_bytes()
+
+
+class TestRetentionEnforcement:
+    """With a schedule supplied, retention_class stops being decoration."""
+
+    @pytest.fixture
+    def scheduled(self, tmp_path):
+        from core.retention import DAY, RetentionSchedule
+
+        class Clock:
+            def __init__(self):
+                self.now = 1_000_000.0
+
+            def __call__(self):
+                return self.now
+
+            def advance_days(self, days):
+                self.now += days * DAY
+
+        clock = Clock()
+        store = PayloadStore(tmp_path / "payloads",
+                             schedule=RetentionSchedule(clock=clock), clock=clock)
+        return store, clock
+
+    def test_destruction_before_the_period_elapses_is_refused(self, scheduled):
+        store, _ = scheduled
+        reference = store.put(SENSITIVE, retention_class="standard")
+        with pytest.raises(PayloadError) as error:
+            store.destroy(reference, requester="dpo", reason="cleanup script")
+        assert "may not be destroyed" in str(error.value)
+        assert store.exists(reference.payload_id)
+
+    def test_destruction_after_the_period_elapses_is_permitted(self, scheduled):
+        store, clock = scheduled
+        reference = store.put(SENSITIVE, retention_class="standard")
+        clock.advance_days(91)
+        store.destroy(reference, requester="dpo", reason="retention expired")
+        assert not store.exists(reference.payload_id)
+
+    def test_a_longer_class_is_held_longer(self, scheduled):
+        store, clock = scheduled
+        reference = store.put(SENSITIVE, retention_class="financial")
+        clock.advance_days(91)
+        with pytest.raises(PayloadError):
+            store.destroy(reference, requester="dpo", reason="retention expired")
+
+    def test_transient_data_can_go_immediately(self, scheduled):
+        store, _ = scheduled
+        reference = store.put(SENSITIVE, retention_class="transient")
+        store.destroy(reference, requester="dpo", reason="no longer needed")
+        assert not store.exists(reference.payload_id)
+
+    def test_a_hold_still_outranks_an_elapsed_period(self, scheduled):
+        store, clock = scheduled
+        reference = store.put(SENSITIVE, retention_class="standard")
+        store.place_hold(reference.payload_id)
+        clock.advance_days(500)
+        with pytest.raises(PayloadError) as error:
+            store.destroy(reference, requester="dpo", reason="retention expired")
+        assert "legal hold" in str(error.value)
+
+    def test_a_sweep_sees_live_payloads_with_their_class(self, scheduled):
+        store, _ = scheduled
+        store.put(SENSITIVE, retention_class="financial")
+        store.put(SENSITIVE, retention_class="transient")
+        pending = store.pending_retention()
+        assert {item["retention_class"] for item in pending} == {"financial", "transient"}
+
+    def test_a_destroyed_payload_leaves_the_sweep(self, scheduled):
+        store, _ = scheduled
+        reference = store.put(SENSITIVE, retention_class="transient")
+        store.destroy(reference, requester="dpo", reason="expired")
+        assert store.pending_retention() == []
+
+    def test_without_a_schedule_the_class_is_not_enforced(self, store):
+        """Retention stays an explicit choice, not a default someone inherits."""
+        reference = store.put(SENSITIVE, retention_class="financial")
+        store.destroy(reference, requester="dpo", reason="no schedule configured")
+        assert not store.exists(reference.payload_id)
