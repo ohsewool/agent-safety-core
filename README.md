@@ -33,8 +33,8 @@ schema/    — event schema (JSON Schema, 버전 관리)
 - [x] **scope binder (`core/scope.py`)** — 해석된 resource identity(inode/origin), policy 내용 digest, context allow-list. `rebind()`가 dispatch 직전 재해석
 - [x] **증적 export + 검증기 (`core/export.py`)** — 원장→해시체인 JSONL, `python -m core.export verify <file>`
 - [x] **M2 조기 달성**: MCP 게이트웨이가 `ExecutionLedger`를 authority로 사용 (`mcp-gateway` 커밋 69d56ad)
-- [ ] M3: AP2 결함주입 벤치마크 + ablation, 서명·anti-rollback 체크포인트
-- [ ] M3: 서명·anti-rollback 체크포인트, redaction lifecycle
+- [x] **AP2 결함주입 ablation (`benchmark/`)** — arm A~E × 시나리오 9종, 지상 진실(실제 charge 수) 기준 측정. 결과: `benchmark/README.md`
+- [ ] M3 잔여: 서명·anti-rollback 체크포인트, redaction lifecycle
 
 ## 검증 이력
 
