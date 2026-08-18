@@ -70,11 +70,18 @@ when a call fails. The scenarios are what make that response wrong.
    produced by B, C, or D individually; E's contribution is covering all harm
    metrics at once, not a synergy. Reported as such rather than claimed as one.
 
+## 이 주장들이 실제 시스템에서도 성립하는가
+
+위 arm들은 메커니즘 하나씩을 분리하려고 따로 만든 것이고, 그래서 당연한 반론이 남는다 — **그 arm들은 시스템이 아니다**.
+
+`profiles/ap2/payment_guard.py`가 그 간극을 메운다. 실제 ledger·scope binder·access control 위에서 결제를 실행하며, `tests/test_payment_guard.py`의 19개 테스트가 벤치마크의 발견을 하나씩 재현한다 — 승인된 금액이 아닌 청구는 거부되고, lease는 두 번 쓰이지 않고, 응답을 잃으면 실패가 아니라 UNKNOWN이 되고, 조회 수단이 없으면 추측 대신 PERMANENTLY_UNRESOLVED로 끝난다. 지상 진실은 여기서도 프로세서가 기록한 실제 청구 횟수다.
+
 ## Limits
 
 - Single-process simulation: concurrency is modelled as repeated attempts, not
   real parallel workers. The ledger's concurrent-claim behaviour is tested
-  separately in `tests/test_ledger.py`.
+  separately in `tests/test_ledger.py`, and the end-to-end payment path in
+  `tests/test_payment_guard.py`.
 - Deterministic, no sampling — these are exact counts for these scenarios, not
   estimates with confidence intervals.
 - The scenario set is derived from the AP2 threat list and is not exhaustive.

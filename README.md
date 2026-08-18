@@ -32,11 +32,12 @@ core/checkpoint.py  Ed25519 서명 + 외부 witness — 롤백·포크 탐지
 core/payload.py     민감값 분리 저장(AES-256-GCM) — 삭제해도 감사 체인이 깨지지 않음
 core/access.py      역할·권한 분리 — 자기 승인 금지, 감사자와 파기 권한 분리
 profiles/kr_ai_act/ 한국 AI 기본법 조항 → 런타임 증적 매핑
+profiles/ap2/       결제 vertical — 벤치마크의 주장을 실제 코어 위에서 재현
 benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 145 tests
+python3 -m pytest tests/ -q          # 164 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -58,6 +59,8 @@ python3 -m core.export verify <file> # 증적 검증
 3. **reconciliation은 그 비용 없이 같은 보호를 얻는다.** 가정하는 대신 무슨 일이 있었는지 확인하기 때문이다.
 4. **한 시나리오는 정직하게 해결 불가다.** 조회 API가 없으면 D·E는 추측하지 않고 `PERMANENTLY_UNRESOLVED`로 끝낸다.
 5. **E의 이득은 전부 개별 메커니즘에 귀속된다.** 시너지 주장은 하지 않는다.
+
+위 arm들은 메커니즘을 분리하려 따로 만든 것이라 "그건 시스템이 아니다"라는 반론이 남는다. `profiles/ap2/`가 같은 속성을 **실제 ledger·scope binder·access control 위에서** 재현한다.
 
 ## 설계 이력 — 이 저장소가 한 번 반려된 기록
 
