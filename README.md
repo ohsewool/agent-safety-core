@@ -30,12 +30,13 @@ core/ledger.py      트랜잭션 실행 원장 (system of record) — 원자적 
 core/export.py      원장 → 해시 체인 JSONL + 파일만으로 동작하는 검증기
 core/checkpoint.py  Ed25519 서명 + 외부 witness — 롤백·포크 탐지
 core/payload.py     민감값 분리 저장(AES-256-GCM) — 삭제해도 감사 체인이 깨지지 않음
+core/access.py      역할·권한 분리 — 자기 승인 금지, 감사자와 파기 권한 분리
 profiles/kr_ai_act/ 한국 AI 기본법 조항 → 런타임 증적 매핑
 benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 120 tests
+python3 -m pytest tests/ -q          # 145 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -64,9 +65,21 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 
 `docs/ADR-002`가 그 재설계다: SQLite 트랜잭션 원장을 system of record로 삼고 해시 체인 저널을 export로 강등했다. `tests/test_ledger.py`가 각 finding을 닫으며, 그중 하나는 **24개 스레드가 같은 lease를 동시에 노려도 dispatch가 정확히 1회**임을 확인한다.
 
+## 권한 분리 (`core/access.py`)
+
+감사 로그는 자신이 기록하는 시스템보다 더 매력적인 표적이다 — 프롬프트·도구 인자·거쳐간 개인정보가 한곳에 모이기 때문이다. 그래서 분리는 정돈이 아니라 구체적 남용을 겨냥한다.
+
+| 분리 | 막는 것 |
+|---|---|
+| 승인자 ≠ 요청자 | 자기 승인. 이게 허용되면 승인 게이트는 장식이다 |
+| 감사자 ≠ 파기 권한 | 검토할 대상을 검토자가 지울 수 있는 상태 |
+| payload 열람 ≠ 기록 열람 | 실행이 있었다는 사실을 보는 것과 그 내용을 보는 것은 다른 권한 |
+
+기본은 거부다. 모르는 주체는 아무것도 갖지 못하고, 부여되지 않은 권한은 보유하지 않은 것이다. 역할 표 자체의 불변식(어떤 역할도 승인과 실행을 동시에 갖지 못한다 등)도 테스트로 고정된다.
+
 ## 남은 작업
 
-- 조직 RBAC, 장기 보존 정책 연동
+- 장기 보존 정책 연동
 - 외부 witness의 배포 형태 결정 (transparency log / 객체 스토리지 버저닝 / 제3자)
 
 근거 문서: `docs/ADR-001`, `docs/ADR-002`, `docs/threat-model-and-non-goals.md`, `benchmark/README.md`.
