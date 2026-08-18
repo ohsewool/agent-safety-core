@@ -35,7 +35,13 @@ schema/    — event schema (JSON Schema, 버전 관리)
 - [x] **M2 조기 달성**: MCP 게이트웨이가 `ExecutionLedger`를 authority로 사용 (`mcp-gateway` 커밋 69d56ad)
 - [x] **AP2 결함주입 ablation (`benchmark/`)** — arm A~E × 시나리오 9종, 지상 진실(실제 charge 수) 기준 측정. 결과: `benchmark/README.md`
 - [x] **서명·anti-rollback 체크포인트 (`core/checkpoint.py`)** — Ed25519 서명 + monotonic sequence + 외부 witness. 유효 서명을 가진 과거 상태 복원(rollback)과 미발행 fork를 탐지
-- [ ] M3 잔여: redaction lifecycle (민감 payload와 불변 감사 봉투 분리)
+- [x] **redaction lifecycle (`core/payload.py`)** — 민감 payload를 불변 감사 봉투와 분리 저장. 삭제 = payload/키 파기 + destruction 이벤트 append(체인 수정 없음), legal hold 우선
+
+## 남은 작업
+
+- 실 배포용 암호화 교체(현재 XOR 키스트림은 "키를 파기하면 payload가 사라진다"를 보이기 위한 것 — AES-GCM으로 교체 시 `_obfuscate` 하나만 바뀜)
+- 조직 RBAC, 장기 보존 정책 연동
+- 외부 witness의 실제 배포 형태 결정(transparency log / 객체 스토리지 버저닝 / 제3자)
 
 ## 검증 이력
 
