@@ -119,3 +119,7 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 - 외부 witness의 배포 형태 결정 (transparency log / 객체 스토리지 버저닝 / 제3자)
 
 근거 문서: `docs/ADR-001`, `docs/ADR-002`, `docs/threat-model-and-non-goals.md`, `benchmark/README.md`.
+
+## 라이선스
+
+Apache License 2.0. [`LICENSE`](LICENSE) 참조.
