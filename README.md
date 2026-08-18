@@ -37,6 +37,8 @@ schema/    — event schema (JSON Schema, 버전 관리)
 - [x] **서명·anti-rollback 체크포인트 (`core/checkpoint.py`)** — Ed25519 서명 + monotonic sequence + 외부 witness. 유효 서명을 가진 과거 상태 복원(rollback)과 미발행 fork를 탐지
 - [x] **redaction lifecycle (`core/payload.py`)** — 민감 payload를 불변 감사 봉투와 분리 저장. 삭제 = payload/키 파기 + destruction 이벤트 append(체인 수정 없음), legal hold 우선
 
+- [x] **한국 AI 기본법 evidence profile (`profiles/kr_ai_act/`)** — 조항별 지원수준(직접/간접/미지원/적용대상 확인 필요) 분류, 증적 패키지 생성(JSON·Markdown), "준수 보장 아님"과 런타임 외 증거 목록을 모든 패키지에 포함
+
 ## 남은 작업
 
 - 실 배포용 암호화 교체(현재 XOR 키스트림은 "키를 파기하면 payload가 사라진다"를 보이기 위한 것 — AES-GCM으로 교체 시 `_obfuscate` 하나만 바뀜)

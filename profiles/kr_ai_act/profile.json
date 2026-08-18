@@ -1,0 +1,102 @@
+{
+  "profile_id": "kr-ai-act",
+  "profile_version": "1.0.0",
+  "law_name": "인공지능 발전과 신뢰 기반 조성 등에 관한 기본법",
+  "jurisdiction": "KR",
+  "effective_date": "2026-01-22",
+  "verified_at": "2026-08-19",
+  "source_url": "https://www.law.go.kr/LSW/lsInfoP.do?lsId=014820",
+  "disclaimer": "이 프로파일은 법률 자문이 아니며 준수를 보장하지 않는다. 런타임에서 관찰 가능한 사실만을 증적으로 제공하며, 의무 이행의 충분성 판단과 비런타임 증거는 법무·규제 담당자의 검토 영역이다.",
+  "obligations": [
+    {
+      "article": "제31조 제1항",
+      "title": "AI 기반 사실의 사전 고지",
+      "applicability": "conditional",
+      "applies_when": "고영향 AI 또는 생성형 AI를 이용한 제품·서비스를 제공하는 경우",
+      "support_level": "indirect",
+      "runtime_events": ["notice_displayed", "notice_policy_version"],
+      "provides": "고지 정책의 설정값·버전·배포 시점과 실제 표시 이벤트의 기록",
+      "cannot_prove": "이용자가 고지를 실제로 인지했는지, 고지 문구·배치가 법적 기준에 적합한지",
+      "non_runtime_evidence": ["UI 스크린샷", "이용약관·계약서 조항", "고지 문구에 대한 법무 검토 기록"],
+      "penalty_note": "법 제43조는 제31조 제1항의 사전고지 미이행을 3천만원 이하 과태료 대상으로 열거한다. 제31조 전체가 아니다."
+    },
+    {
+      "article": "제31조 제2·3항",
+      "title": "생성물 표시",
+      "applicability": "conditional",
+      "applies_when": "생성형 AI 결과물을 제공하는 경우 (실제와 구분이 어려운 가상 결과물은 별도 고지·표시)",
+      "support_level": "indirect",
+      "runtime_events": ["generation_labelled", "output_digest_recorded"],
+      "provides": "표시 메타데이터 삽입 이벤트와 결과물 해시",
+      "cannot_prove": "표시의 명확성·가시성, 예술적 표현 예외 해당 여부",
+      "non_runtime_evidence": ["렌더링 결과 화면", "표시 방식에 대한 판단 근거"]
+    },
+    {
+      "article": "제32조",
+      "title": "안전성 확보 (일정 기준 이상 최첨단 AI)",
+      "applicability": "applicability_check_required",
+      "applies_when": "시행령상 세 요건을 모두 충족: ① 학습 누적 연산량 10^26 FLOPs 이상 ② 최첨단 기술 적용 ③ 생명·신체 안전 및 기본권에 광범위·중대한 영향 우려",
+      "support_level": "conditional",
+      "runtime_events": ["risk_identified", "mitigation_applied", "incident_detected", "report_submitted"],
+      "provides": "위험 식별·완화 조치 실행 로그, 사고 타임라인, 제출 이벤트 기록",
+      "cannot_prove": "위험 식별의 포괄성, 완화 조치의 충분성, 보고 내용의 적정성",
+      "non_runtime_evidence": ["위험관리 체계 문서", "제출 보고서 본문"],
+      "note": "일반 AI 서비스에는 적용되지 않는다. 적용 대상이 확인된 조직만 frontier-ai-incident 프로파일을 사용한다."
+    },
+    {
+      "article": "제34조 제1호",
+      "title": "위험관리방안 수립·운영",
+      "applicability": "conditional",
+      "applies_when": "고영향 AI 또는 이를 이용한 제품·서비스를 제공하는 경우",
+      "support_level": "indirect",
+      "runtime_events": ["policy_evaluated", "execution_blocked", "risk_classified"],
+      "provides": "정책 평가 결과와 차단 이력",
+      "cannot_prove": "위험관리 계획의 품질과 체계적 수행 여부",
+      "non_runtime_evidence": ["위험관리 계획서", "운영 회의록"]
+    },
+    {
+      "article": "제34조 제2호",
+      "title": "결과 설명 방안 수립·시행",
+      "applicability": "conditional",
+      "applies_when": "고영향 AI 제공 시",
+      "support_level": "indirect",
+      "runtime_events": ["execution_recorded"],
+      "provides": "입력·모델·도구·정책·결정 메타데이터",
+      "cannot_prove": "설명자료의 기술적 정확성·충분성, 모델 자체의 설명가능성",
+      "non_runtime_evidence": ["설명 방안 문서", "모델 카드"]
+    },
+    {
+      "article": "제34조 제3호",
+      "title": "이용자 보호 방안 수립·운영",
+      "applicability": "conditional",
+      "applies_when": "고영향 AI 제공 시",
+      "support_level": "not_supported",
+      "runtime_events": [],
+      "provides": "없음 — 피해 신고·조치 이벤트를 외부에서 연계하는 경우에만 간접 증거",
+      "cannot_prove": "보호 방안의 존재·포괄성·실효성",
+      "non_runtime_evidence": ["이용자 보호 절차 문서", "민원 처리 이력", "구제 체계"]
+    },
+    {
+      "article": "제34조 제4호",
+      "title": "사람의 관리·감독",
+      "applicability": "conditional",
+      "applies_when": "고영향 AI 제공 시",
+      "support_level": "direct",
+      "runtime_events": ["approval_requested", "approved", "revoked", "claim_refused", "lease_claimed"],
+      "provides": "승인 요청·승인자·승인 범위(scope digest)·만료·거절·철회와 그에 따른 실행 결과의 연결된 기록",
+      "cannot_prove": "감독자의 자격, 감독 빈도·깊이의 적정성, 승인 절차의 조직적 타당성",
+      "non_runtime_evidence": ["감독 체계 조직도", "승인자 교육 기록", "권한 부여 근거"]
+    },
+    {
+      "article": "제34조 제5호",
+      "title": "조치 문서의 작성·보관",
+      "applicability": "conditional",
+      "applies_when": "고영향 AI 제공 시",
+      "support_level": "direct",
+      "runtime_events": ["*"],
+      "provides": "해시 체인으로 연결된 실행 증적, 서명된 체크포인트, 보존·파기 이력",
+      "cannot_prove": "문서 내용의 완전성·정확성, 법정 보존기간 요건 충족 여부",
+      "non_runtime_evidence": ["보존 정책 문서"]
+    }
+  ]
+}
