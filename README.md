@@ -33,11 +33,12 @@ core/payload.py     민감값 분리 저장(AES-256-GCM) — 삭제해도 감사
 core/access.py      역할·권한 분리 — 자기 승인 금지, 감사자와 파기 권한 분리
 profiles/kr_ai_act/ 한국 AI 기본법 조항 → 런타임 증적 매핑
 profiles/ap2/       결제 vertical — 벤치마크의 주장을 실제 코어 위에서 재현
+adapters/           기존 도구를 감싸 코어의 규칙 아래로 넣는 최소 표면
 benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 164 tests
+python3 -m pytest tests/ -q          # 179 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -61,6 +62,20 @@ python3 -m core.export verify <file> # 증적 검증
 5. **E의 이득은 전부 개별 메커니즘에 귀속된다.** 시너지 주장은 하지 않는다.
 
 위 arm들은 메커니즘을 분리하려 따로 만든 것이라 "그건 시스템이 아니다"라는 반론이 남는다. `profiles/ap2/`가 같은 속성을 **실제 ledger·scope binder·access control 위에서** 재현한다.
+
+## 기존 에이전트에 붙이기
+
+이미 동작하는 에이전트를 다시 짜야 한다면 이 코어의 보장은 값이 없다. 어댑터는 부작용을 일으키는 함수 하나를 감싸는 것이 전부다.
+
+```python
+charge = guard.guarded(charge_customer, tool_id="payments")
+
+charge(amount=1000, payee="m1")                  # ApprovalRequired — 아무것도 청구되지 않음
+charge(amount=1000, payee="m1", _lease=lease)    # 정확히 한 번 청구
+charge(amount=9999, payee="m1", _lease=lease)    # LeaseRefused — 승인된 청구가 아님
+```
+
+자동 승인 옵션도, 재시도 헬퍼도 없다. 응답을 잃으면 falsy 값이 아니라 예외가 난다 — 타임아웃 뒤에 `if not result:`를 쓰는 순간 불확실한 청구가 실패로 둔갑하기 때문이다. 승인은 어댑터가 아니라 별도 객체에 두었다. 같은 객체에 있으면 자기 승인이 한 줄 수정이 된다.
 
 ## 설계 이력 — 이 저장소가 한 번 반려된 기록
 
