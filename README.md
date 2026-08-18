@@ -29,8 +29,11 @@ schema/    — event schema (JSON Schema, 버전 관리)
 - [x] event schema v0 (`schema/event.schema.json`)
 - [x] 해시 체인 이벤트 기록 + 변조 탐지 (`core/event.py`) — **저널은 export 경로로 강등됨(ADR-002)**
 - [x] **트랜잭션 실행 원장 (`core/ledger.py`)** — system of record. 원자적 lease claim, 상태 전이와 증적의 단일 커밋, 중단 복구(→UNKNOWN), 승인 철회, reconciliation 권한 분리
-- [ ] M1 잔여: scope binder(context·policy digest·resource identity), 입력 canonicalizer, 원장→저널 export
-- [ ] M2: MCP adapter 연동 (게이트웨이의 `transport.py`와 결합)
+- [x] **입력 canonicalizer (`core/canonical.py`)** — 중복키·비유한수·과도한 중첩 거부, NFC 정규화
+- [x] **scope binder (`core/scope.py`)** — 해석된 resource identity(inode/origin), policy 내용 digest, context allow-list. `rebind()`가 dispatch 직전 재해석
+- [x] **증적 export + 검증기 (`core/export.py`)** — 원장→해시체인 JSONL, `python -m core.export verify <file>`
+- [x] **M2 조기 달성**: MCP 게이트웨이가 `ExecutionLedger`를 authority로 사용 (`mcp-gateway` 커밋 69d56ad)
+- [ ] M3: AP2 결함주입 벤치마크 + ablation, 서명·anti-rollback 체크포인트
 - [ ] M3: 서명·anti-rollback 체크포인트, redaction lifecycle
 
 ## 검증 이력
