@@ -133,3 +133,57 @@ class TestInlineRedaction:
         original = dict(SENSITIVE)
         redact(SENSITIVE, secret_keys=("card_number",))
         assert SENSITIVE == original
+
+
+class TestAuthenticatedEncryption:
+    """AES-GCM gives guarantees a keystream cipher cannot: edits are detected."""
+
+    def test_a_modified_blob_fails_to_decrypt_rather_than_yielding_other_data(self, store, tmp_path):
+        reference = store.put(SENSITIVE)
+        blob_path = tmp_path / "payloads" / "blobs" / reference.payload_id
+        blob = bytearray(blob_path.read_bytes())
+        blob[-1] ^= 0x01  # one bit
+        blob_path.write_bytes(bytes(blob))
+        with pytest.raises(PayloadError) as error:
+            store.get(reference)
+        assert "modified" in str(error.value)
+
+    def test_a_blob_cannot_be_relabelled_as_another_record(self, store, tmp_path):
+        """The payload id is associated data, so moving a blob breaks the tag."""
+        first = store.put(SENSITIVE)
+        second = store.put({"card_number": "5555444433332222"})
+        blobs = tmp_path / "payloads" / "blobs"
+        keys = tmp_path / "payloads" / "keys"
+        # Give the second record the first record's bytes and key.
+        (blobs / second.payload_id).write_bytes((blobs / first.payload_id).read_bytes())
+        (keys / second.payload_id).write_bytes((keys / first.payload_id).read_bytes())
+        with pytest.raises(PayloadError):
+            store.get(second)
+
+    def test_the_wrong_key_does_not_yield_plaintext(self, store, tmp_path):
+        reference = store.put(SENSITIVE)
+        (tmp_path / "payloads" / "keys" / reference.payload_id).write_bytes(b"\x00" * 32)
+        with pytest.raises(PayloadError):
+            store.get(reference)
+
+    def test_a_truncated_blob_is_refused(self, store, tmp_path):
+        reference = store.put(SENSITIVE)
+        (tmp_path / "payloads" / "blobs" / reference.payload_id).write_bytes(b"\x00" * 4)
+        with pytest.raises(PayloadError) as error:
+            store.get(reference)
+        assert "truncated" in str(error.value)
+
+    def test_each_payload_gets_a_distinct_nonce(self, store, tmp_path):
+        """Reusing a nonce under one key would be catastrophic for GCM."""
+        blobs = tmp_path / "payloads" / "blobs"
+        nonces = set()
+        for _ in range(20):
+            reference = store.put(SENSITIVE)
+            nonces.add((blobs / reference.payload_id).read_bytes()[:12])
+        assert len(nonces) == 20
+
+    def test_identical_values_produce_different_ciphertexts(self, store, tmp_path):
+        blobs = tmp_path / "payloads" / "blobs"
+        first = store.put(SENSITIVE)
+        second = store.put(SENSITIVE)
+        assert (blobs / first.payload_id).read_bytes() != (blobs / second.payload_id).read_bytes()

@@ -29,7 +29,7 @@ core/scope.py       승인 바인딩 — 해석된 resource identity, 정책 내
 core/ledger.py      트랜잭션 실행 원장 (system of record) — 원자적 lease, 단일 커밋, 중단 복구
 core/export.py      원장 → 해시 체인 JSONL + 파일만으로 동작하는 검증기
 core/checkpoint.py  Ed25519 서명 + 외부 witness — 롤백·포크 탐지
-core/payload.py     민감값 분리 저장 — 삭제해도 감사 체인이 깨지지 않음
+core/payload.py     민감값 분리 저장(AES-256-GCM) — 삭제해도 감사 체인이 깨지지 않음
 profiles/kr_ai_act/ 한국 AI 기본법 조항 → 런타임 증적 매핑
 benchmark/          결함 주입 ablation (A~E)
 ```
@@ -66,7 +66,6 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 
 ## 남은 작업
 
-- 실배포용 암호화 교체 (현재 XOR 키스트림은 "키를 파기하면 payload가 사라진다"를 보이기 위한 것 — AES-GCM 교체 시 `_obfuscate` 한 함수만 바뀐다)
 - 조직 RBAC, 장기 보존 정책 연동
 - 외부 witness의 배포 형태 결정 (transparency log / 객체 스토리지 버저닝 / 제3자)
 

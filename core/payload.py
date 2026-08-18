@@ -19,6 +19,10 @@ is the value itself, which is the entire point.
 A legal hold blocks destruction, because "we were required to keep it" and "we
 were required to delete it" is a conflict a system should surface rather than
 resolve on its own.
+
+Payloads are held under AES-256-GCM with a per-payload key. The payload id is
+bound in as associated data, so a blob cannot be relabelled as a different
+record and still decrypt.
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .canonical import digest, dumps
 
@@ -59,22 +66,29 @@ class PayloadReference:
         }
 
 
-def _obfuscate(data: bytes, key: bytes) -> bytes:
-    """XOR with a per-payload keystream.
+NONCE_BYTES = 12
 
-    Deliberately simple and deliberately labelled: this makes the stored bytes
-    unreadable without the key, so destroying the key destroys the payload. It is
-    not a substitute for authenticated encryption at rest, and the README says
-    so; swapping in AES-GCM changes this function and nothing else.
+
+def _encrypt(data: bytes, key: bytes, *, associated: bytes) -> bytes:
+    """AES-256-GCM. The nonce is stored ahead of the ciphertext.
+
+    Authenticated rather than merely obscured: an attacker who edits the stored
+    bytes gets a decryption failure instead of different plaintext. The payload
+    id travels as associated data, so a blob cannot be moved to a different
+    record and still open.
     """
-    stream = bytearray()
-    counter = 0
-    while len(stream) < len(data):
-        import hashlib
+    nonce = secrets.token_bytes(NONCE_BYTES)
+    return nonce + AESGCM(key).encrypt(nonce, data, associated)
 
-        stream.extend(hashlib.sha256(key + counter.to_bytes(8, "big")).digest())
-        counter += 1
-    return bytes(byte ^ stream[index] for index, byte in enumerate(data))
+
+def _decrypt(blob: bytes, key: bytes, *, associated: bytes) -> bytes:
+    if len(blob) <= NONCE_BYTES:
+        raise PayloadError("stored payload is truncated")
+    nonce, ciphertext = blob[:NONCE_BYTES], blob[NONCE_BYTES:]
+    try:
+        return AESGCM(key).decrypt(nonce, ciphertext, associated)
+    except InvalidTag as error:
+        raise PayloadError("stored payload failed authentication: it was modified") from error
 
 
 class PayloadStore:
@@ -95,11 +109,13 @@ class PayloadStore:
         if classification not in CLASSIFICATIONS:
             raise PayloadError(f"unknown classification: {classification}")
         payload_id = secrets.token_hex(16)
-        key = secrets.token_bytes(32)
+        key = AESGCM.generate_key(bit_length=256)
         body = dumps(value).encode("utf-8")
 
         (self.root / "keys" / payload_id).write_bytes(key)
-        (self.root / "blobs" / payload_id).write_bytes(_obfuscate(body, key))
+        (self.root / "blobs" / payload_id).write_bytes(
+            _encrypt(body, key, associated=payload_id.encode("ascii"))
+        )
         return PayloadReference(
             payload_id=payload_id,
             payload_digest=digest(value),
@@ -115,7 +131,11 @@ class PayloadStore:
         blob_path = self.root / "blobs" / reference.payload_id
         if not key_path.exists() or not blob_path.exists():
             raise PayloadError(f"payload {reference.payload_id} has been destroyed")
-        value = json.loads(_obfuscate(blob_path.read_bytes(), key_path.read_bytes()).decode("utf-8"))
+        plaintext = _decrypt(
+            blob_path.read_bytes(), key_path.read_bytes(),
+            associated=reference.payload_id.encode("ascii"),
+        )
+        value = json.loads(plaintext.decode("utf-8"))
         if digest(value) != reference.payload_digest:
             raise PayloadError("stored payload does not match the digest in the record")
         return value
