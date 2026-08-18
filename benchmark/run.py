@@ -130,6 +130,21 @@ def attribute(summary: dict[str, dict[str, int]]) -> dict[str, Any]:
         "false_retries_prevented":
             baseline["false_retries"] - summary["E"]["false_retries"],
     }
+    if "F" in summary:
+        attribution["F"] = {
+            "mechanism": "E + postcondition verification (independent channel)",
+            "duplicate_side_effects_prevented":
+                baseline["duplicate_side_effects"] - summary["F"]["duplicate_side_effects"],
+            "unauthorized_side_effects_prevented":
+                baseline["unauthorized_side_effects"] - summary["F"]["unauthorized_side_effects"],
+            "false_retries_prevented":
+                baseline["false_retries"] - summary["F"]["false_retries"],
+            # The one metric that separates F from E: asking the processor fails
+            # when the processor is what broke; observing the world does not.
+            "unresolved_outcomes_resolved":
+                summary["E"]["unresolved"] - summary["F"]["unresolved"],
+        }
+
     attribution["E"] = {
         "mechanism": "full combination",
         **full,
@@ -169,7 +184,7 @@ def render(measurements: list[Measurement], summary: dict[str, dict[str, int]],
         )
 
     lines += ["", "## Attribution (relative to arm A)", ""]
-    for arm in ("B", "C", "D", "E"):
+    for arm in [name for name in ("B", "C", "D", "E", "F") if name in attribution]:
         entry = attribution[arm]
         lines.append(f"**{arm} — {entry['mechanism']}**")
         lines.append(f"- duplicate side effects prevented: {entry['duplicate_side_effects_prevented']}")
@@ -177,6 +192,12 @@ def render(measurements: list[Measurement], summary: dict[str, dict[str, int]],
         lines.append(f"- false retries prevented: {entry['false_retries_prevented']}")
         if entry.get("completions_lost"):
             lines.append(f"- **cost**: {entry['completions_lost']} legitimate completion(s) lost")
+        if arm == "F" and entry.get("unresolved_outcomes_resolved"):
+            lines.append(
+                f"- **outcomes E could not resolve, now resolved: "
+                f"{entry['unresolved_outcomes_resolved']}** — asking the processor fails "
+                f"when the processor is what broke; observing the world does not"
+            )
         if arm == "E":
             extra = entry["combination_effect"]
             unattributable = {k: v for k, v in extra.items() if v > 0}

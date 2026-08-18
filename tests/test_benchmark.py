@@ -88,6 +88,15 @@ class TestMechanismClaims:
         assert summary["D"]["unresolved"] >= 1
         assert summary["E"]["unresolved"] >= 1
 
+    def test_an_independent_channel_resolves_what_asking_again_cannot(self, summary):
+        """F's distinguishing claim: the processor being down is not the end of it."""
+        assert summary["F"]["unresolved"] < summary["E"]["unresolved"]
+
+    def test_verification_costs_nothing_on_the_other_metrics(self, summary):
+        for metric in ("duplicate_side_effects", "unauthorized_side_effects",
+                       "false_retries", "missed_completions"):
+            assert summary["F"][metric] <= summary["E"][metric], metric
+
 
 class TestAttribution:
     def test_gains_are_credited_to_the_mechanism_that_produced_them(self, summary):
@@ -104,6 +113,10 @@ class TestAttribution:
 
     def test_lease_cost_is_recorded_in_the_attribution(self, summary):
         assert attribute(summary)["C"]["completions_lost"] > 0
+
+    def test_verification_gain_is_attributed_to_the_channel_not_to_retrying(self, summary):
+        attribution = attribute(summary)
+        assert attribution["F"]["unresolved_outcomes_resolved"] >= 1
 
 
 class TestReproducibility:

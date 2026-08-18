@@ -31,6 +31,7 @@ core/export.py      원장 → 해시 체인 JSONL + 파일만으로 동작하�
 core/checkpoint.py  Ed25519 서명 + 외부 witness — 롤백·포크 탐지
 core/payload.py     민감값 분리 저장(AES-256-GCM) — 삭제해도 감사 체인이 깨지지 않음
 core/access.py      역할·권한 분리 — 자기 승인 금지, 감사자와 파기 권한 분리
+core/verification.py 후조건 검증 — 되묻지 않고 세계 상태를 관찰해 UNKNOWN 해소
 profiles/kr_ai_act/ 한국 AI 기본법 조항 → 런타임 증적 매핑
 profiles/ap2/       결제 vertical — 벤치마크의 주장을 실제 코어 위에서 재현
 adapters/           기존 도구를 감싸 코어의 규칙 아래로 넣는 최소 표면
@@ -38,7 +39,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 179 tests
+python3 -m pytest tests/ -q          # 204 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -54,12 +55,15 @@ python3 -m core.export verify <file> # 증적 검증
 | C A + 1회용 lease | **0** | 1 | **0** | 0 | **1** |
 | D A + UNKNOWN + reconciliation | **0** | 1 | **0** | 1 | 0 |
 | E 전부 | **0** | **0** | **0** | 1 | 0 |
+| F E + 후조건 검증 | **0** | **0** | **0** | **0** | 0 |
 
 1. **scope 바인딩과 중복 방지는 서로 대체할 수 없다.** B는 미승인 청구를 막지만 중복은 하나도 못 막고, C·D는 그 반대다.
 2. **lease 단독은 재시도를 아예 하지 않아 중복 0을 얻는다.** 그 대가로 "아무 일도 일어나지 않았으니 재시도가 옳았던" 경우에 정당한 작업을 잃는다. 이 비용이 보이지 않으면 포기하는 구현이 완벽해 보인다.
 3. **reconciliation은 그 비용 없이 같은 보호를 얻는다.** 가정하는 대신 무슨 일이 있었는지 확인하기 때문이다.
 4. **한 시나리오는 정직하게 해결 불가다.** 조회 API가 없으면 D·E는 추측하지 않고 `PERMANENTLY_UNRESOLVED`로 끝낸다.
 5. **E의 이득은 전부 개별 메커니즘에 귀속된다.** 시너지 주장은 하지 않는다.
+
+6. **되묻는 것과 보는 것은 다르다.** E는 프로세서에게 "무슨 일이 있었나"를 되묻는데, 정작 프로세서가 고장 난 경우엔 그 질문이 응답이 사라진 경로를 그대로 지나간다. F는 대신 독립 채널에서 후조건을 관찰해, E가 미해결로만 남길 수 있었던 건을 해소한다. (arXiv:2608.02645 — 재시도 정책이 아니라 검증이 중복을 줄인다는 측정 결과)
 
 위 arm들은 메커니즘을 분리하려 따로 만든 것이라 "그건 시스템이 아니다"라는 반론이 남는다. `profiles/ap2/`가 같은 속성을 **실제 ledger·scope binder·access control 위에서** 재현한다.
 

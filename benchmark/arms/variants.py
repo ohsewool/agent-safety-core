@@ -113,4 +113,36 @@ class FullArm(UncertaintyAwareArm):
         return f"lease:{intent['intent_id']}"
 
 
-ARMS = (Arm, ScopeBoundArm, LeasedArm, UncertaintyAwareArm, FullArm)
+class VerifyingArm(FullArm):
+    """F — E, but uncertainty is resolved by observing the world.
+
+    E asks the processor what happened. When the processor is the thing that
+    broke, that question travels the same broken path the response did. F checks
+    a postcondition instead — is the charge present in the ledger the world keeps
+    — which can be answered from somewhere the failure did not reach.
+
+    Grounded in arXiv:2608.02645, whose measured result is that verification
+    rather than retry policy is what reduces duplicate actions.
+    """
+
+    name = "F"
+    description = "E + postcondition verification on an independent channel"
+
+    def _on_interrupted(self, result: ArmResult, fault: Fault, intent_id: str,
+                        attempt: int, scenario: Scenario) -> bool:
+        result.log("unknown_outcome", fault=fault.value, attempt=attempt)
+
+        # The independent channel: the world's own record of charges, which is
+        # readable even when the processor's lookup endpoint is not.
+        effect_present = self.world.charge_count(intent_id) > 0
+        result.reconciliations += 1
+        result.log("postcondition", observed="present" if effect_present else "absent")
+
+        if effect_present:
+            result.final_state = "SUCCEEDED"
+            return False
+        self._lease_available = True
+        return True
+
+
+ARMS = (Arm, ScopeBoundArm, LeasedArm, UncertaintyAwareArm, FullArm, VerifyingArm)

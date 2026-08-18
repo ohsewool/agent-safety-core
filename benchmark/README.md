@@ -36,6 +36,7 @@ should be visible.
 | C | A + single-use / expiring lease |
 | D | A + explicit `UNKNOWN` + reconciliation before retry |
 | E | B + C + D + verifiable evidence |
+| F | E + postcondition verification on an independent channel |
 
 Arm A is not a strawman: it retries on timeout, which is the natural response
 when a call fails. The scenarios are what make that response wrong.
@@ -49,6 +50,7 @@ when a call fails. The scenarios are what make that response wrong.
 | C | 0 | 1 | 0 | 0 | 1 |
 | D | 0 | 1 | 0 | 1 | 0 |
 | E | 0 | 0 | 0 | 1 | 0 |
+| F | 0 | 0 | 0 | **0** | 0 |
 
 1. **Scope binding and duplicate prevention are independent.** B stops the
    unauthorized charge and prevents no duplicates; C and D prevent every
@@ -66,7 +68,15 @@ when a call fails. The scenarios are what make that response wrong.
    D and E end `PERMANENTLY_UNRESOLVED` rather than guessing. That is the
    intended behaviour, and the unresolved count is reported rather than hidden.
 
-5. **No gain in E is unattributable.** Every improvement E shows is already
+5. **Asking the broken system is not the same as looking.** E resolves an
+   uncertain outcome by querying the processor, which fails in the case that
+   matters most: the processor is what broke, so the query travels the same
+   path the lost response did. F checks a postcondition on an independent
+   channel instead and clears the one outcome E could only mark unresolved.
+   This follows arXiv:2608.02645, whose measured result is that verification
+   rather than retry policy is what reduces duplicate actions.
+
+6. **No gain in E is unattributable.** Every improvement E shows is already
    produced by B, C, or D individually; E's contribution is covering all harm
    metrics at once, not a synergy. Reported as such rather than claimed as one.
 
