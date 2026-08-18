@@ -209,3 +209,65 @@ class TestArgumentBinding:
         scope = scope_for(target, arguments={"amount": float("nan")})
         with pytest.raises(ScopeError):
             scope.digest()
+
+
+class TestArgumentPolicyIntegration:
+    """Declared equivalences reach the approval binding (arXiv:2608.02645 critique)."""
+
+    def test_strictness_is_the_default(self, tmp_path):
+        target = tmp_path / "data.txt"
+        target.write_text("x", encoding="utf-8")
+        first = scope_for(target, arguments={"amount": 1000})
+        second = scope_for(target, arguments={"amount": 1000.0})
+        assert first.digest() != second.digest()
+
+    def test_a_declared_equivalence_keeps_the_approval_valid(self, tmp_path):
+        """A planner rewording 1000 as 1000.0 should not need re-approval."""
+        from core.binding import ArgumentPolicy, Equivalence
+
+        target = tmp_path / "data.txt"
+        target.write_text("x", encoding="utf-8")
+        policy = ArgumentPolicy({"amount": Equivalence.NUMERIC})
+        first = scope_for(target, arguments={"amount": 1000}, argument_policy=policy)
+        second = scope_for(target, arguments={"amount": 1000.0}, argument_policy=policy)
+        assert first.digest() == second.digest()
+
+    def test_loosening_the_policy_invalidates_an_existing_approval(self, tmp_path):
+        """Otherwise a relaxation would widen what was already approved."""
+        from core.binding import ArgumentPolicy, Equivalence
+
+        target = tmp_path / "data.txt"
+        target.write_text("x", encoding="utf-8")
+        approved = scope_for(target, arguments={"amount": 1000})
+        relaxed = scope_for(target, arguments={"amount": 1000},
+                            argument_policy=ArgumentPolicy({"amount": Equivalence.NUMERIC}))
+        assert approved.digest() != relaxed.digest()
+
+    def test_an_equivalence_does_not_hide_a_real_change(self, tmp_path):
+        from core.binding import ArgumentPolicy, Equivalence
+
+        target = tmp_path / "data.txt"
+        target.write_text("x", encoding="utf-8")
+        policy = ArgumentPolicy({"amount": Equivalence.NUMERIC})
+        first = scope_for(target, arguments={"amount": 1000}, argument_policy=policy)
+        second = scope_for(target, arguments={"amount": 9999}, argument_policy=policy)
+        assert first.digest() != second.digest()
+
+    def test_rebinding_preserves_the_argument_policy(self, tmp_path):
+        from core.binding import ArgumentPolicy, Equivalence
+
+        target = tmp_path / "data.txt"
+        target.write_text("x", encoding="utf-8")
+        policy = ArgumentPolicy({"amount": Equivalence.NUMERIC})
+        scope = scope_for(target, arguments={"amount": 1000}, argument_policy=policy)
+        assert rebind(scope).digest() == scope.digest()
+
+    def test_a_misapplied_equivalence_surfaces_as_a_scope_error(self, tmp_path):
+        from core.binding import ArgumentPolicy, Equivalence
+
+        target = tmp_path / "data.txt"
+        target.write_text("x", encoding="utf-8")
+        scope = scope_for(target, arguments={"amount": "1000"},
+                          argument_policy=ArgumentPolicy({"amount": Equivalence.NUMERIC}))
+        with pytest.raises(ScopeError):
+            scope.digest()

@@ -27,6 +27,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from .binding import STRICT, ArgumentPolicy, BindingError
 from .canonical import CanonicalizationError, digest
 
 
@@ -159,6 +160,7 @@ class ExecutionScope:
     policy: PolicyBinding | None = None
     context: Mapping[str, Any] = field(default_factory=dict)
     context_spec: ContextSpec = ContextSpec()
+    argument_policy: ArgumentPolicy = STRICT
 
     def digest(self) -> str:
         try:
@@ -168,13 +170,16 @@ class ExecutionScope:
                     "actor_id": self.actor_id,
                     "tool_id": self.tool_id,
                     "operation": self.operation,
-                    "arguments": dict(self.arguments),
+                    # Digested through the argument policy, which is itself part
+                    # of that digest: relaxing a rule after approval would widen
+                    # what the approval permits.
+                    "arguments": self.argument_policy.digest_of(self.arguments),
                     "resources": [item.as_dict() for item in self.resources],
                     "policy": self.policy.as_dict() if self.policy else None,
                     "context": self.context_spec.digest_of(self.context),
                 }
             )
-        except CanonicalizationError as error:
+        except (CanonicalizationError, BindingError) as error:
             raise ScopeError(str(error)) from error
 
 
@@ -198,4 +203,5 @@ def rebind(scope: ExecutionScope, *, resolvers: Mapping[str, Any] | None = None)
         operation=scope.operation, arguments=scope.arguments,
         resources=tuple(refreshed), policy=scope.policy,
         context=scope.context, context_spec=scope.context_spec,
+        argument_policy=scope.argument_policy,
     )

@@ -26,6 +26,7 @@ AI 에이전트가 실제 부작용을 일으키는 작업(결제, 파일 쓰기
 ```
 core/canonical.py   입력 정규화 — 중복 키·비유한수·과도한 중첩 거부, NFC 정규화
 core/scope.py       승인 바인딩 — 해석된 resource identity, 정책 내용 digest, context allow-list
+core/binding.py     인자 동등성 — 무엇이 "다른 호출"인지 명시적으로 선언
 core/ledger.py      트랜잭션 실행 원장 (system of record) — 원자적 lease, 단일 커밋, 중단 복구
 core/export.py      원장 → 해시 체인 JSONL + 파일만으로 동작하는 검증기
 core/checkpoint.py  Ed25519 서명 + 외부 witness — 롤백·포크 탐지
@@ -39,7 +40,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 204 tests
+python3 -m pytest tests/ -q          # 239 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -66,6 +67,19 @@ python3 -m core.export verify <file> # 증적 검증
 6. **되묻는 것과 보는 것은 다르다.** E는 프로세서에게 "무슨 일이 있었나"를 되묻는데, 정작 프로세서가 고장 난 경우엔 그 질문이 응답이 사라진 경로를 그대로 지나간다. F는 대신 독립 채널에서 후조건을 관찰해, E가 미해결로만 남길 수 있었던 건을 해소한다. (arXiv:2608.02645 — 재시도 정책이 아니라 검증이 중복을 줄인다는 측정 결과)
 
 위 arm들은 메커니즘을 분리하려 따로 만든 것이라 "그건 시스템이 아니다"라는 반론이 남는다. `profiles/ap2/`가 같은 속성을 **실제 ledger·scope binder·access control 위에서** 재현한다.
+
+## 무엇이 "다른 호출"인가
+
+승인은 인자 digest에 묶이고, 기본은 엄격하다 — `1000`과 `1000.0`은 다르고 `["a","b"]`와 `["b","a"]`도 다르다. 안전한 기본값이지만 공짜는 아니다. 플래너가 요청 내용을 바꾸지 않고 표현만 바꿔도 승인이 거부되고, 맞는 일을 거부하는 시스템은 사람에게 두 번 승인하는 습관을 들인다.
+
+그렇다고 전부 정규화하면 문제가 더 커진다. `["alice","bob"]`이 `["bob","alice"]`와 같다는 판단은 도메인에 대한 주장이고, 순서대로 결재하는 승인자 목록에서는 틀린 주장이다.
+
+그래서 동등성은 **인자별로 선언**하고 추론하지 않는다. 그리고 정책 자체가 digest에 포함된다 — 승인을 받은 뒤 규칙을 느슨하게 바꾸면 그 승인이 허용하는 범위가 넓어지므로, 대신 승인이 무효가 된다.
+
+```python
+policy = ArgumentPolicy({"amount": Equivalence.NUMERIC, "tags": Equivalence.UNORDERED})
+# amount는 1000 == 1000.0, tags는 순서 무관. 나머지는 전부 엄격.
+```
 
 ## 기존 에이전트에 붙이기
 
