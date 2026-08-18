@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-safety-core/event/v0",
+  "title": "Execution Event v0",
+  "type": "object",
+  "required": ["event_id", "run_id", "sequence", "occurred_at", "actor", "action", "execution", "integrity"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 8},
+    "run_id": {"type": "string", "minLength": 8},
+    "sequence": {"type": "integer", "minimum": 0},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "actor": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"enum": ["human", "ai_agent", "service"]},
+        "auth_context_hash": {"type": "string"}
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["tool", "operation"],
+      "properties": {
+        "tool": {"type": "string"},
+        "operation": {"type": "string"},
+        "arguments_redacted": {"type": "object"},
+        "arguments_hash": {"type": "string"}
+      }
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "model": {"type": "string"},
+        "model_version": {"type": "string"},
+        "prompt_hash": {"type": "string"},
+        "code_revision": {"type": "string"},
+        "environment_fingerprint": {"type": "string"}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "policy_id": {"type": "string"},
+        "version": {"type": "string"},
+        "decision": {"enum": ["allow", "deny", "require_approval"]},
+        "reasons": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "properties": {
+        "request_id": {"type": ["string", "null"]},
+        "approver_id": {"type": ["string", "null"]},
+        "scope_hash": {"type": ["string", "null"]},
+        "issued_at": {"type": ["string", "null"]},
+        "expires_at": {"type": ["string", "null"]}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "started_at": {"type": ["string", "null"]},
+        "finished_at": {"type": ["string", "null"]},
+        "status": {"enum": ["proposed", "blocked", "approved", "succeeded", "failed", "unknown_outcome"]},
+        "result_hash": {"type": ["string", "null"]}
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["previous_hash", "event_hash"],
+      "properties": {
+        "previous_hash": {"type": "string"},
+        "event_hash": {"type": "string"},
+        "signature": {"type": ["string", "null"]}
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "properties": {
+        "classification": {"enum": ["public", "internal", "confidential", "restricted"]},
+        "redactions": {"type": "array", "items": {"type": "string"}},
+        "retention_class": {"type": "string"}
+      }
+    }
+  }
+}
