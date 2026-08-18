@@ -4,7 +4,7 @@
 
 1. **승인 없는 부작용 없음**: 정책이 require_approval인 액션은 유효한 승인 바인딩 없이 실행되지 않는다.
 2. **승인 범위 이탈 없음**: 승인 후 tool/operation/arguments/context/policy version 중 하나라도 바뀌면 실행 거부.
-3. **중복 부작용 없음**: 동일 lease로 N회 병렬/재시도 제출 시 외부 부작용은 최대 1회.
+3. **중복 실행 시도 없음** (2026-08-19 외부 리뷰 반영으로 정교화): 코어는 동일 authorization/lease에 대한 **코어 수준의 중복 실행 시도**를 차단하며(internal at-most-once attempt), 결과가 불확실하면 reconciliation 없이 재실행하지 않는다. 외부 시스템 수준의 exactly-once는 코어 단독으로 보장 불가 — 외부가 idempotency key를 지원하면 `lease_id`를 key로 전파해 달성하고, 미지원이면 그 한계를 명시한다.
 4. **불확실은 불확실로**: 성공/실패를 증명할 수 없으면 `unknown_outcome`으로 기록하고 자동 재시도하지 않는다. reconciliation 후에만 최종 분류.
 5. **변조는 탐지된다**: 이벤트 수정·삭제·삽입·재정렬은 verify_chain에서 검출된다 (tamper-evident — tamper-proof 아님).
 

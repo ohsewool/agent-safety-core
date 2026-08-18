@@ -27,9 +27,14 @@ schema/    — event schema (JSON Schema, 버전 관리)
 ## 현재 구현 상태
 
 - [x] event schema v0 (`schema/event.schema.json`)
-- [x] 정규화 이벤트 기록 + 해시 체인 + 변조 탐지 (`core/event.py`) — M0 종료 조건
-- [ ] M1: append-only journal, redaction, 검증 CLI
-- [ ] M2: 정책 엔진·승인 lease (Coordinator에서 이식)
-- [ ] 이후는 외부 검증 판정에 따름
+- [x] 해시 체인 이벤트 기록 + 변조 탐지 (`core/event.py`) — **저널은 export 경로로 강등됨(ADR-002)**
+- [x] **트랜잭션 실행 원장 (`core/ledger.py`)** — system of record. 원자적 lease claim, 상태 전이와 증적의 단일 커밋, 중단 복구(→UNKNOWN), 승인 철회, reconciliation 권한 분리
+- [ ] M1 잔여: scope binder(context·policy digest·resource identity), 입력 canonicalizer, 원장→저널 export
+- [ ] M2: MCP adapter 연동 (게이트웨이의 `transport.py`와 결합)
+- [ ] M3: 서명·anti-rollback 체크포인트, redaction lifecycle
 
-근거 문서: `work/AI-Research-work/M0-자산검증-보고서.md`, 계획서 v2 2종.
+## 검증 이력
+
+적대적 설계 검증(2026-08-19)에서 v0 설계가 **NO(재설계)** 판정을 받았다. CRITICAL 3건(승인 scope 결손, lease 비원자성, cross-store 원자성 부재)은 "JSONL 저널 + 별도 lease 원장" 모델의 구조적 결함이었다. `docs/ADR-002-execution-safety-state-model.md`가 그 재설계이며, `tests/test_ledger.py`의 21개 회귀 테스트가 각 finding을 닫는다(동시 24스레드 lease 경합에서 dispatch 정확히 1회 포함).
+
+근거 문서: `work/Agent-Execution-Safety-Core-적대적-설계-검증-결과.md`, `work/AI-Research-work/M0-자산검증-보고서.md`.
