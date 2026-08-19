@@ -22,3 +22,6 @@ include = ["core*", "adapters*", "profiles*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: spawns a subprocess; seconds rather than milliseconds",
+]
