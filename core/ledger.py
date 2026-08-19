@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS executions (
     state          TEXT NOT NULL,
     lease_id       TEXT UNIQUE,
     expires_at     REAL,
+    approved_at    REAL,
+    dispatcher_id  TEXT,
     created_at     REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -59,6 +61,10 @@ CREATE TABLE IF NOT EXISTS events (
     recorded_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_by_execution ON events(execution_id, sequence);
+CREATE TABLE IF NOT EXISTS clock_state (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    high_water REAL NOT NULL
+);
 """
 
 
@@ -82,7 +88,10 @@ class Execution:
 class ExecutionLedger:
     """Durable state machine for side-effecting executions."""
 
-    def __init__(self, path: str, *, clock=None) -> None:
+    def __init__(self, path: str, *, clock=None, dispatcher_id: str | None = None) -> None:
+        # Which process claimed a lease. Recovery must only reclassify this
+        # instance's interrupted dispatches; see recover_interrupted.
+        self.dispatcher_id = dispatcher_id or uuid.uuid4().hex
         self._connection = sqlite3.connect(path, isolation_level=None)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA journal_mode=WAL")
@@ -104,6 +113,35 @@ class ExecutionLedger:
         else:
             self._connection.execute("COMMIT")
 
+    def _observe_clock(self, connection: sqlite3.Connection) -> tuple[float, float | None]:
+        """Return (now, previous high-water), recording the new high-water.
+
+        A TTL bounds the approval window only while the clock moves forward, and
+        `time.time()` gives no such promise: an NTP correction or a restored VM
+        snapshot can move it back. Comparing against the approval timestamp alone
+        does not catch it - the interesting case is a clock that ran past the
+        deadline and then came back to a moment before it, which leaves the
+        approval looking live again while nothing in the row has changed.
+
+        So the ledger remembers the furthest point in time it has seen. Going
+        back before that is not a legal reading, whatever the row says.
+
+        No tolerance is allowed. A threshold here would be a number invented to
+        make the check quiet, and refusing to dispatch is the safe direction: the
+        cost is a refusal that names the clock, against dispatching under an
+        approval that has already lapsed.
+        """
+        now = self._clock()
+        row = connection.execute("SELECT high_water FROM clock_state WHERE id=1").fetchone()
+        previous = row["high_water"] if row else None
+        if previous is None or now > previous:
+            connection.execute(
+                "INSERT INTO clock_state (id, high_water) VALUES (1, ?)"
+                " ON CONFLICT(id) DO UPDATE SET high_water=excluded.high_water",
+                (now,),
+            )
+        return now, previous
+
     def _append_event(
         self,
         connection: sqlite3.Connection,
@@ -113,6 +151,11 @@ class ExecutionLedger:
         to_state: str | None,
         detail: Mapping[str, Any],
     ) -> None:
+        # Every write observes the clock, so the high-water mark reflects all
+        # ledger activity rather than only lease claims. A clock that runs past
+        # a deadline and comes back is then contradicted by whatever else the
+        # ledger handled in between.
+        now, _ = self._observe_clock(connection)
         connection.execute(
             "INSERT INTO events (execution_id, kind, from_state, to_state, detail, recorded_at)"
             " VALUES (?,?,?,?,?,?)",
@@ -122,7 +165,7 @@ class ExecutionLedger:
                 from_state,
                 to_state,
                 json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-                self._clock(),
+                now,
             ),
         )
 
@@ -146,12 +189,19 @@ class ExecutionLedger:
 
     def approve(self, execution_id: str, *, approver_id: str, scope_digest: str,
                 ttl_seconds: float) -> str:
-        """Bind an approval to an exact scope and issue a single-use lease."""
+        """Bind an approval to an exact scope and issue a single-use lease.
+
+        Refuses self-approval. `access.py` has always defined the permission and
+        the separation rule, but nothing here consulted it, so an agent could
+        approve its own request by passing its own id - the whole control was a
+        docstring. The check that needs no configuration is made unconditional:
+        the requester is already on the row.
+        """
         lease_id = uuid.uuid4().hex
         expires_at = self._clock() + ttl_seconds
         with self._transaction() as connection:
             row = connection.execute(
-                "SELECT state, scope_digest FROM executions WHERE execution_id=?",
+                "SELECT state, scope_digest, actor_id FROM executions WHERE execution_id=?",
                 (execution_id,),
             ).fetchone()
             if row is None:
@@ -160,9 +210,15 @@ class ExecutionLedger:
                 raise LedgerError(f"cannot approve from state {row['state']}")
             if row["scope_digest"] != scope_digest:
                 raise LedgerError("scope digest does not match the recorded intent")
+            if row["actor_id"] == approver_id:
+                raise LedgerError(
+                    "self-approval refused: the actor that requested this execution "
+                    "cannot also approve it"
+                )
             connection.execute(
-                "UPDATE executions SET state=?, lease_id=?, expires_at=? WHERE execution_id=?",
-                (APPROVED, lease_id, expires_at, execution_id),
+                "UPDATE executions SET state=?, lease_id=?, expires_at=?, approved_at=?"
+                " WHERE execution_id=?",
+                (APPROVED, lease_id, expires_at, self._clock(), execution_id),
             )
             self._append_event(connection, execution_id, "approved", CREATED, APPROVED,
                                {"approver_id": approver_id, "lease_id": lease_id,
@@ -178,8 +234,8 @@ class ExecutionLedger:
         """
         with self._transaction() as connection:
             row = connection.execute(
-                "SELECT execution_id, state, scope_digest, expires_at FROM executions"
-                " WHERE lease_id=?",
+                "SELECT execution_id, state, scope_digest, expires_at, approved_at"
+                " FROM executions WHERE lease_id=?",
                 (lease_id,),
             ).fetchone()
             if row is None:
@@ -193,20 +249,26 @@ class ExecutionLedger:
                 self._append_event(connection, execution_id, "claim_refused", row["state"], None,
                                    {"reason": "scope_mismatch"})
                 return None
-            if row["expires_at"] is not None and self._clock() > row["expires_at"]:
+            now, high_water = self._observe_clock(connection)
+            if high_water is not None and now < high_water:
+                self._append_event(connection, execution_id, "claim_refused", row["state"], None,
+                                   {"reason": "clock_moved_backwards",
+                                    "high_water": high_water, "observed_now": now})
+                return None
+            if row["expires_at"] is not None and now > row["expires_at"]:
                 connection.execute("UPDATE executions SET state=? WHERE execution_id=?",
                                    (EXPIRED, execution_id))
                 self._append_event(connection, execution_id, "claim_refused", APPROVED, EXPIRED,
                                    {"reason": "lease_expired"})
                 return None
             changed = connection.execute(
-                "UPDATE executions SET state=? WHERE execution_id=? AND state=?",
-                (DISPATCHING, execution_id, APPROVED),
+                "UPDATE executions SET state=?, dispatcher_id=? WHERE execution_id=? AND state=?",
+                (DISPATCHING, self.dispatcher_id, execution_id, APPROVED),
             ).rowcount
             if changed != 1:
                 return None
             self._append_event(connection, execution_id, "lease_claimed", APPROVED, DISPATCHING,
-                               {"lease_id": lease_id})
+                               {"lease_id": lease_id, "dispatcher_id": self.dispatcher_id})
             return execution_id
 
     def revoke(self, execution_id: str, *, revoker_id: str, reason: str) -> bool:
@@ -240,27 +302,61 @@ class ExecutionLedger:
 
     def reconcile(self, execution_id: str, *, new_state: str, reconciler_id: str,
                   evidence: Mapping[str, Any]) -> None:
-        """Resolve an UNKNOWN outcome. Agents may not perform this transition."""
+        """Resolve an UNKNOWN outcome.
+
+        The actor that requested the execution may not resolve it. This used to
+        be a sentence in this docstring and nothing else: `reconciler_id` was a
+        free string, so the agent whose call ended in UNKNOWN could declare it
+        SUCCEEDED and move on - which is precisely the state that exists to stop
+        an agent from deciding on its own what happened.
+        """
         if new_state not in {SUCCEEDED, FAILED, PERMANENTLY_UNRESOLVED}:
             raise LedgerError(f"illegal reconciliation target {new_state}")
         with self._transaction() as connection:
             row = connection.execute(
-                "SELECT state FROM executions WHERE execution_id=?", (execution_id,)
+                "SELECT state, actor_id FROM executions WHERE execution_id=?", (execution_id,)
             ).fetchone()
             if row is None or row["state"] != UNKNOWN:
                 raise LedgerError("reconciliation requires an UNKNOWN execution")
+            if row["actor_id"] == reconciler_id:
+                raise LedgerError(
+                    "self-reconciliation refused: the actor whose execution ended "
+                    "UNKNOWN cannot be the one who declares how it ended"
+                )
             connection.execute("UPDATE executions SET state=? WHERE execution_id=?",
                                (new_state, execution_id))
             self._append_event(connection, execution_id, "reconciled", UNKNOWN, new_state,
                                {"reconciler_id": reconciler_id, **dict(evidence)})
 
-    def recover_interrupted(self) -> tuple[str, ...]:
-        """Reclassify executions interrupted mid-dispatch as UNKNOWN (never retry)."""
+    def recover_interrupted(self, *, all_dispatchers: bool = False) -> tuple[str, ...]:
+        """Reclassify *this* dispatcher's interrupted dispatches as UNKNOWN.
+
+        Never retries: the external side effect may or may not have happened.
+
+        Scoped to this instance because it previously was not. Two workers can
+        share a ledger, and a sweep over every DISPATCHING row meant one worker
+        restarting declared another worker's in-flight call UNKNOWN while it was
+        still running. The live worker could then no longer record its own
+        result - record_outcome requires DISPATCHING - so a call that actually
+        succeeded was left permanently unresolved by a process that had nothing
+        to do with it.
+
+        `all_dispatchers=True` restores the sweep for the single-process case
+        and for an operator cleaning up after a worker that is definitely gone.
+        It is opt-in because it is only safe when the caller knows no other
+        dispatcher is live, and that is not a fact this ledger can check.
+        """
         recovered: list[str] = []
         with self._transaction() as connection:
-            rows = connection.execute(
-                "SELECT execution_id FROM executions WHERE state=?", (DISPATCHING,)
-            ).fetchall()
+            if all_dispatchers:
+                rows = connection.execute(
+                    "SELECT execution_id FROM executions WHERE state=?", (DISPATCHING,)
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT execution_id FROM executions WHERE state=? AND dispatcher_id=?",
+                    (DISPATCHING, self.dispatcher_id),
+                ).fetchall()
             for row in rows:
                 connection.execute("UPDATE executions SET state=? WHERE execution_id=?",
                                    (UNKNOWN, row["execution_id"]))

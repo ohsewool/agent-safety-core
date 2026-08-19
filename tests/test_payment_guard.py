@@ -251,7 +251,7 @@ class TestCrashRecovery:
         """A crash between claiming and recording must not look like it never happened."""
         processor = Processor()
         path = str(tmp_path / "ledger.db")
-        first = ExecutionLedger(path)
+        first = ExecutionLedger(path, dispatcher_id="payments-worker")
         guard = PaymentGuard(first, access=access, policy=POLICY, context=CONTEXT,
                              processor=processor, lookup=processor.lookup)
         charge = intent()
@@ -260,7 +260,9 @@ class TestCrashRecovery:
                                                            context=CONTEXT).digest())
         first.close()  # process dies mid-dispatch
 
-        second = ExecutionLedger(path)
+        # Same dispatcher identity: recovery is scoped so that one worker
+        # restarting cannot declare another worker's live call UNKNOWN.
+        second = ExecutionLedger(path, dispatcher_id="payments-worker")
         try:
             restarted = PaymentGuard(second, access=access, policy=POLICY, context=CONTEXT,
                                      processor=processor, lookup=processor.lookup)

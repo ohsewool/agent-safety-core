@@ -122,12 +122,14 @@ class TestF03CrossStoreAtomicity:
     def test_interrupted_dispatch_recovers_to_unknown_not_retry(self, tmp_path):
         """Crash mid-dispatch: the row must become UNKNOWN, never re-dispatchable."""
         path = str(tmp_path / "crash.db")
-        first = ExecutionLedger(path)
+        first = ExecutionLedger(path, dispatcher_id="worker-1")
         execution_id, lease_id = approved_lease(first)
         first.claim_lease(lease_id, scope_digest=SCOPE)
         first.close()  # simulate process death while DISPATCHING
 
-        restarted = ExecutionLedger(path)
+        # The same worker coming back, not a different one: recovery is scoped to
+        # a dispatcher so a live worker's in-flight call is never swept up.
+        restarted = ExecutionLedger(path, dispatcher_id="worker-1")
         assert restarted.recover_interrupted() == (execution_id,)
         assert restarted.get(execution_id).state == UNKNOWN
         # The lease cannot be reused to dispatch again (invariant 3A).
