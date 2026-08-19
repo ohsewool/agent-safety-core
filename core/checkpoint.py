@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+
+from .witness import FileWitness, WitnessError, WitnessPort
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -110,48 +112,32 @@ def verify_signature(checkpoint: Checkpoint, public_key_pem: bytes) -> bool:
 
 
 @dataclass
-class Witness:
-    """An append-only record of checkpoint sequences, outside the host's control.
+class Witness(FileWitness):
+    """Backwards-compatible name for the file-backed witness.
 
-    Modelled as a file here. In deployment this is the part that must not live on
-    the machine being audited — a transparency log, an object store with
-    versioning, or another party's system. Its only job is to answer "what is the
-    highest sequence you have seen for this log?" truthfully.
+    Kept because callers already say `Witness(path)` and because the change that
+    matters is not the class - it is that `verify_freshness` now accepts anything
+    satisfying `WitnessPort`, so a deployment can supply a witness that actually
+    lives off the audited machine. See `core/witness.py` for why no vendor is
+    picked here.
+
+    `publish` still takes a Checkpoint, which is the convenient shape at this
+    layer; the port takes the three fields, which is the shape a remote witness
+    can honour without knowing what a Checkpoint is.
     """
 
-    path: Path
-    _entries: list[dict[str, Any]] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        self.path = Path(self.path)
-        if self.path.exists():
-            self._entries = [
-                json.loads(line)
-                for line in self.path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-
-    def publish(self, checkpoint: Checkpoint) -> None:
-        latest = self.latest_sequence(checkpoint.log_id)
-        if latest is not None and checkpoint.sequence <= latest:
-            raise CheckpointError(
-                f"witness refuses a non-advancing sequence: {checkpoint.sequence} after {latest}"
-            )
-        entry = {"log_id": checkpoint.log_id, "sequence": checkpoint.sequence,
-                 "checkpoint_digest": checkpoint.digest()}
-        self._entries.append(entry)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, sort_keys=True) + "\n")
-
-    def latest_sequence(self, log_id: str) -> int | None:
-        sequences = [entry["sequence"] for entry in self._entries if entry["log_id"] == log_id]
-        return max(sequences) if sequences else None
-
-    def digest_at(self, log_id: str, sequence: int) -> str | None:
-        for entry in self._entries:
-            if entry["log_id"] == log_id and entry["sequence"] == sequence:
-                return entry["checkpoint_digest"]
-        return None
+    def publish(self, checkpoint: "Checkpoint | str", sequence: int | None = None,
+                digest: str | None = None) -> None:
+        try:
+            if isinstance(checkpoint, Checkpoint):
+                super().publish(checkpoint.log_id, checkpoint.sequence, checkpoint.digest())
+            else:
+                super().publish(checkpoint, int(sequence), str(digest))
+        except WitnessError as error:
+            # Callers of this class have always caught CheckpointError. Letting
+            # the port's exception escape here would break them for the sake of
+            # an internal refactor, so the compatibility boundary translates.
+            raise CheckpointError(str(error)) from error
 
 
 def journal_tip(journal_path: Path | str) -> str:
@@ -200,7 +186,7 @@ class FreshnessReport:
 
 
 def verify_freshness(journal_path: Path | str, checkpoint: Checkpoint,
-                     *, public_key_pem: bytes, witness: Witness) -> FreshnessReport:
+                     *, public_key_pem: bytes, witness: WitnessPort) -> FreshnessReport:
     """Check that a journal is intact *and* that it is the current one."""
     notes: list[str] = []
 
