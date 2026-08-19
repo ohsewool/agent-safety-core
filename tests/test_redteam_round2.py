@@ -156,6 +156,65 @@ class TestClockRollback:
         assert ledger.claim_lease(lease, scope_digest=SCOPE) is not None
         ledger.close()
 
+    def test_the_high_water_mark_survives_the_reading_that_was_refused(self, tmp_path):
+        """The mark is a high-water mark, and nothing here said so.
+
+        Found by breaking the code on purpose: making the mark follow the clock
+        in both directions instead of only upward passed all 331 tests. It is
+        not a cosmetic difference. The first claim under a rolled-back clock is
+        still refused, because the comparison happens before the mark is
+        written - so a suite that checks one claim sees correct behaviour. The
+        refused reading has by then replaced the mark, and every later claim
+        compares against the lowered one and is allowed.
+
+        In other words the check disarms itself the first time it fires, which
+        is the worst available failure: the log shows a rollback detected, and
+        the next lease goes through.
+        """
+        now = [1000.0]
+        ledger = ExecutionLedger(str(tmp_path / "clock.db"), clock=lambda: now[0])
+        _, first = approved(ledger, ttl=10)
+        _, second = approved(ledger, ttl=10)
+
+        now[0] = 5000.0
+        approved(ledger)         # unrelated traffic: the ledger witnesses 5000
+        now[0] = 1005.0
+
+        assert ledger.claim_lease(first, scope_digest=SCOPE) is None
+        assert ledger.claim_lease(second, scope_digest=SCOPE) is None, (
+            "the second claim was allowed, so the refused reading overwrote the mark"
+        )
+        ledger.close()
+
+    def test_the_mark_still_rises_with_the_clock(self, tmp_path):
+        """Monotonic, not frozen. A mark that stops advancing would refuse
+        every honest reading a moment later, which is the same check failing in
+        the opposite direction."""
+        now = [1000.0]
+        ledger = ExecutionLedger(str(tmp_path / "rise.db"), clock=lambda: now[0])
+        _, lease = approved(ledger, ttl=600)
+
+        now[0] = 1100.0
+        approved(ledger)
+        now[0] = 1200.0
+        assert ledger.claim_lease(lease, scope_digest=SCOPE) is not None
+        ledger.close()
+
+    def test_every_refused_claim_leaves_the_mark_where_it_was(self, tmp_path):
+        """Repeat the rollback: the mark must not walk downward one refusal at
+        a time. Three refusals with nothing in between is the shape a retry
+        loop produces."""
+        now = [1000.0]
+        ledger = ExecutionLedger(str(tmp_path / "walk.db"), clock=lambda: now[0])
+        leases = [approved(ledger, ttl=10)[1] for _ in range(3)]
+
+        now[0] = 5000.0
+        approved(ledger)
+        now[0] = 1005.0
+
+        assert [ledger.claim_lease(lease, scope_digest=SCOPE) for lease in leases] == [None] * 3
+        ledger.close()
+
     def test_an_ordinary_expiry_is_still_an_expiry(self, tmp_path):
         now = [1000.0]
         ledger = ExecutionLedger(str(tmp_path / "clock.db"), clock=lambda: now[0])

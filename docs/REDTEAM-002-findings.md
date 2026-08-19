@@ -58,3 +58,31 @@
 - `record_outcome`의 evidence는 검증되지 않는다 — 신뢰 경계 안이지만 명시할 가치가 있다
 - 단일 프로세스 다중 스레드에서 `dispatcher_id`가 같으므로, 스레드 단위 복구는 여전히 구분하지 못한다
 - `events()`는 전량을 메모리에 올린다 — 원장이 커지면 문제
+
+## Finding 7 — the rollback check disarmed itself the first time it fired
+
+Found by mutation rather than by reading: `_observe_clock` was changed to record
+the clock reading unconditionally instead of only when it advances, and all 331
+tests still passed.
+
+The change is not cosmetic. A high-water mark that follows the clock downward
+still refuses the *first* claim under a rolled-back clock, because the
+comparison happens before the mark is written — so a suite that checks one claim
+sees correct behaviour and reports the mechanism as working. By then the refused
+reading has replaced the mark, and every later claim compares against the
+lowered one and is allowed.
+
+That is the worst shape available for a safety check: the log shows a rollback
+detected, and the next lease goes through.
+
+The code was already correct. What was missing was any test that a *second*
+claim is also refused — the suite checked that the alarm sounds, never that it
+is still armed afterwards. Three tests now pin it: the second claim, a
+three-deep retry loop, and the opposite direction (a mark that stops advancing
+would refuse every honest reading a moment later).
+
+**Method note.** Thirteen deliberate breakages were applied across the five
+repositories; twelve were caught. A negative control was run first — harmless
+whitespace edits to the same files, confirming the probe was not simply
+failing for unrelated reasons. Without that control the twelve passes would
+have proved nothing.
