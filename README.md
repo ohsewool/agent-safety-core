@@ -125,3 +125,12 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 ## 라이선스
 
 Apache License 2.0. [`LICENSE`](LICENSE) 참조.
+
+## 함께 보기
+
+이 저장소는 다섯 개 중 하나다. 전체 지도와 각각이 무엇을 발견했는지는 [프로필](https://github.com/ohsewool)에 있다.
+
+- [`modelmate`](https://github.com/ohsewool/modelmate) — 증거가 없으면 확신하지 않는 모델링 도우미
+- [`rag-profile-selector`](https://github.com/ohsewool/rag-profile-selector) — 인용이 어디를 가리키는지 측정 · 한국어 법령 코퍼스
+- [`mcp-gateway`](https://github.com/ohsewool/mcp-gateway) — MCP 서버 앞의 보안 프록시
+- [`document-intelligence`](https://github.com/ohsewool/document-intelligence) — 파서에 의존하지 않는 문서 증거 모델
