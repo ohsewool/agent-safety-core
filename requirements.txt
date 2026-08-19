@@ -1,0 +1,5 @@
+# Runtime
+cryptography>=42        # Ed25519 checkpoints, AES-256-GCM payload encryption
+
+# Tests
+pytest>=8
