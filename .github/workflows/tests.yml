@@ -39,4 +39,4 @@ jobs:
           fi
 
       - name: Run the suite
-        run: python -m pytest -q
+        run: python -m pytest -q -rs   # -rs names every skip and why
