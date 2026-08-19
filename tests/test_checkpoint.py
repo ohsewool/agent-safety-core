@@ -183,3 +183,90 @@ class TestWitness:
         import json
         last = json.loads(world["journal"].read_text(encoding="utf-8").splitlines()[-1])
         assert journal_tip(world["journal"]) == last["integrity"]["event_hash"]
+
+
+class TestTheVerdictNamesWhichFailure:
+    """`ok` is one boolean over four checks, and its failures differ in kind.
+
+    "The witness has never seen this log" is what a first checkpoint looks like
+    before publication. "Rollback" is someone presenting an older checkpoint
+    that was also validly signed. Both read as FAILED, and telling them apart
+    meant matching on the note text - recovering a value from prose, which this
+    project has had to fix twice elsewhere.
+    """
+
+    def _world(self, tmp_path):
+        from core.export import export_ledger
+        from core.ledger import ExecutionLedger
+
+        ledger = ExecutionLedger(str(tmp_path / "core.db"), dispatcher_id="w1")
+        ledger.create(run_id="r", actor_id="a", tool_id="t",
+                      operation="op", scope_digest="d")
+        journal = tmp_path / "journal.jsonl"
+        export_ledger(ledger, journal)
+        ledger.close()
+        return journal, Witness(tmp_path / "witness.jsonl"), Signer.generate()
+
+    def _checkpoint(self, journal, signer, sequence, previous=None):
+        return create_checkpoint(journal, log_id="L", sequence=sequence,
+                                 previous=previous, signer=signer,
+                                 now=1000.0 + sequence)
+
+    def _check(self, journal, checkpoint, signer, witness):
+        return verify_freshness(journal, checkpoint,
+                                public_key_pem=signer.public_key_pem(),
+                                witness=witness)
+
+    def test_an_unpublished_checkpoint_is_not_witnessed(self, tmp_path):
+        """Expected before the first publish - not the same as an attack."""
+        journal, witness, signer = self._world(tmp_path)
+        first = self._checkpoint(journal, signer, 1)
+        report = self._check(journal, first, signer, witness)
+        assert report.verdict == "not_witnessed"
+        assert not report.ok
+
+    def test_a_published_current_checkpoint_says_current(self, tmp_path):
+        journal, witness, signer = self._world(tmp_path)
+        first = self._checkpoint(journal, signer, 1)
+        witness.publish(first)
+        report = self._check(journal, first, signer, witness)
+        assert report.verdict == "current"
+        assert report.ok
+
+    def test_an_old_checkpoint_after_a_newer_one_is_a_rollback(self, tmp_path):
+        journal, witness, signer = self._world(tmp_path)
+        first = self._checkpoint(journal, signer, 1)
+        witness.publish(first)
+        second = self._checkpoint(journal, signer, 2, previous=first)
+        witness.publish(second)
+
+        report = self._check(journal, first, signer, witness)
+        assert report.verdict == "rollback"
+
+    def test_a_checkpoint_the_witness_has_not_caught_up_to_is_distinct(self, tmp_path):
+        """Not yet published is not the same as contradicted."""
+        journal, witness, signer = self._world(tmp_path)
+        first = self._checkpoint(journal, signer, 1)
+        witness.publish(first)
+        second = self._checkpoint(journal, signer, 2, previous=first)
+
+        assert self._check(journal, second, signer, witness).verdict == "ahead_of_witness"
+
+    def test_a_forged_signature_outranks_anything_the_witness_says(self, tmp_path):
+        """A checkpoint that is not trustworthy at all is not a freshness
+        question."""
+        journal, witness, signer = self._world(tmp_path)
+        first = self._checkpoint(journal, signer, 1)
+        witness.publish(first)
+
+        other = Signer.generate()
+        report = verify_freshness(journal, first,
+                                  public_key_pem=other.public_key_pem(),
+                                  witness=witness)
+        assert report.verdict == "signature_invalid"
+
+    def test_the_summary_carries_the_verdict(self, tmp_path):
+        """So a log line is actionable without parsing the sentence after it."""
+        journal, witness, signer = self._world(tmp_path)
+        first = self._checkpoint(journal, signer, 1)
+        assert "[not_witnessed]" in self._check(journal, first, signer, witness).summary()

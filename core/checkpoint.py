@@ -179,10 +179,40 @@ class FreshnessReport:
         return all((self.signature_valid, self.chain_intact, self.tip_matches,
                     self.sequence_current))
 
+    @property
+    def verdict(self) -> str:
+        """Which failure this is, as a value rather than a sentence.
+
+        `ok` is one boolean over four checks, and two of the failures it covers
+        need opposite responses. "The witness has never seen this log" is what a
+        first checkpoint looks like before it is published; "rollback" is
+        someone presenting an old checkpoint that was also validly signed. Both
+        read as FAILED, and telling them apart meant matching on the note text -
+        the same recovering-a-value-from-prose this project has had to fix twice
+        elsewhere.
+
+        Ordered by what a reader should act on first: a broken signature or
+        chain says the artefact is not trustworthy at all, which outranks
+        anything the witness has to say about it.
+        """
+        if not self.signature_valid:
+            return "signature_invalid"
+        if not self.chain_intact:
+            return "chain_broken"
+        if not self.tip_matches:
+            return "tip_mismatch"
+        if self.witness_sequence is None:
+            return "not_witnessed"
+        if self.presented_sequence < self.witness_sequence:
+            return "rollback"
+        if self.presented_sequence > self.witness_sequence:
+            return "ahead_of_witness"
+        return "current"
+
     def summary(self) -> str:
         if self.ok:
             return f"OK — checkpoint {self.presented_sequence} is signed, current, and matches the journal"
-        return "FAILED — " + "; ".join(self.notes)
+        return f"FAILED [{self.verdict}] — " + "; ".join(self.notes)
 
 
 def verify_freshness(journal_path: Path | str, checkpoint: Checkpoint,
