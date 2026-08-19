@@ -1,0 +1,24 @@
+# Packaging exists because mcp-gateway depends on this repository, and its CI
+# was reaching in with PYTHONPATH. A dependency worth having is a dependency
+# worth installing.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-safety-core"
+version = "0.1.0"
+description = "에이전트 실행 안전 코어 — 승인과 실행의 결속, 1회용 lease, UNKNOWN_OUTCOME"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = ["cryptography>=42"]
+
+[project.urls]
+Source = "https://github.com/ohsewool/agent-safety-core"
+
+[tool.setuptools.packages.find]
+include = ["core*", "adapters*", "profiles*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
