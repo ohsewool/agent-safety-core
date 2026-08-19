@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
@@ -152,6 +152,54 @@ def verify_export(source: Path | str) -> VerificationReport:
         previous = integrity.get("event_hash", "")
 
     return VerificationReport(count, tuple(violations), previous)
+
+
+def reconcile_with_ledger(source: Path | str, ledger: Any) -> VerificationReport:
+    """Check an export against the ledger it claims to represent.
+
+    `verify_export` checks the journal against itself: the hash chain holds and
+    sequences advance. That is a different property from representing the
+    ledger, and only the first was checkable - so a journal exported before more
+    executions happened still passed, and "the export verifies" quietly meant
+    "the export is internally consistent" while reading as "this is the record".
+
+    ADR-002 makes the SQLite ledger the system of record and the journal an
+    export of it. An export nobody can compare against the record is a document
+    with a hash chain, not evidence.
+
+    Missing and extra records are reported separately. "Someone showed you a
+    stale copy" and "someone added a record that was never in the ledger" call
+    for different responses, and collapsing them into a count would leave the
+    reader to guess which happened.
+    """
+    source = Path(source)
+    report = verify_export(source)
+
+    exported: list[dict[str, Any]] = []
+    for line in source.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                exported.append(json.loads(line))
+            except json.JSONDecodeError:
+                break        # verify_export already recorded this
+
+    def key(record: Mapping[str, Any]) -> tuple:
+        body = record.get("body", record)
+        return (body.get("execution_id"), body.get("kind"), body.get("sequence"))
+
+    in_journal = {key(record) for record in exported}
+    in_ledger = {key(body) for body in _bodies(ledger.events())}
+
+    extra_violations = [
+        Violation(line=0, reason=f"ledger event absent from the export: {missing}")
+        for missing in sorted(in_ledger - in_journal, key=str)
+    ] + [
+        Violation(line=0, reason=f"export record not present in the ledger: {found}")
+        for found in sorted(in_journal - in_ledger, key=str)
+    ]
+    # The report is immutable, which is the right shape for a verdict - so a
+    # new one is returned rather than the existing one edited.
+    return replace(report, violations=tuple(report.violations) + tuple(extra_violations))
 
 
 def main(argv: list[str] | None = None) -> int:
