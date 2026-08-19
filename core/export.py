@@ -151,7 +151,14 @@ def verify_export(source: Path | str) -> VerificationReport:
                           kind="chain_broken")
             )
         expected = _event_hash(record, integrity.get("previous_hash", ""))
-        if integrity.get("event_hash") != expected:
+        # `event_hash` here, `record_hash` in mcp-gateway's audit log. The two
+        # formats were described as readable by one verifier and were not: the
+        # canonical form and the chaining are identical, only the field name
+        # differs, so each verifier rejected the other's log as tampered. Both
+        # names are accepted rather than one renamed, because renaming would
+        # invalidate every log already written.
+        found = integrity.get("event_hash", integrity.get("record_hash"))
+        if found != expected:
             violations.append(Violation(number, "record content was modified", kind="content_modified"))
         sequence = record.get("sequence")
         if isinstance(sequence, int):
@@ -162,7 +169,7 @@ def verify_export(source: Path | str) -> VerificationReport:
                               kind="sequence_regressed")
                 )
             last_sequence = sequence
-        previous = integrity.get("event_hash", "")
+        previous = integrity.get("event_hash", integrity.get("record_hash", ""))
 
     return VerificationReport(count, tuple(violations), previous)
 

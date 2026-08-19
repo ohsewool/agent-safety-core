@@ -193,3 +193,75 @@ class TestEachViolationSaysWhichKind:
 
         for violation in verify_export(journal).violations:
             assert violation.kind != "unclassified", violation.reason
+
+
+class TestOneVerifierReadsBothLogs:
+    """The README says the two logs share a format so one verifier reads both.
+
+    It was not true. The canonical form and the chaining are identical; the
+    integrity field is called `event_hash` here and `record_hash` in
+    mcp-gateway, so each verifier rejected the other's log as a modified record.
+    A claim about interoperability that nobody had run.
+
+    Both names are accepted rather than one renamed, because renaming would
+    invalidate every log already written.
+    """
+
+    def _gateway_style(self, tmp_path):
+        """A record in the sibling's format, written by hand.
+
+        Constructed here rather than importing mcp-gateway, so this repository's
+        suite does not gain a dependency on a sibling to test its own reader.
+        """
+        import hashlib
+        import json
+
+        from core.canonical import dumps
+
+        body = {"sequence": 1, "session_id": "s1", "server_id": "fs",
+                "recorded_at": 1000.0, "kind": "decision", "action": "forwarded"}
+        previous = "0" * 64
+        sealed = dict(body)
+        sealed["integrity"] = {
+            "previous_hash": previous,
+            "record_hash": hashlib.sha256(
+                previous.encode("ascii") + dumps(body).encode("utf-8")).hexdigest(),
+        }
+        path = tmp_path / "gateway.jsonl"
+        path.write_text(json.dumps(sealed, ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":")) + "\n", encoding="utf-8")
+        return path
+
+    def test_a_gateway_record_verifies_here(self, tmp_path):
+        assert verify_export(self._gateway_style(tmp_path)).ok
+
+    def test_tampering_with_it_is_still_caught(self, tmp_path):
+        """Accepting the other name must not accept anything else."""
+        import json
+
+        path = self._gateway_style(tmp_path)
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["action"] = "blocked"
+        path.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":")) + "\n", encoding="utf-8")
+
+        kinds = {v.kind for v in verify_export(path).violations}
+        assert "content_modified" in kinds
+
+    def test_a_record_with_neither_name_is_refused(self, tmp_path):
+        import json
+
+        path = tmp_path / "odd.jsonl"
+        path.write_text(json.dumps({"sequence": 1, "integrity": {"previous_hash": "0" * 64}})
+                        + "\n", encoding="utf-8")
+        assert not verify_export(path).ok
+
+    def test_the_canonical_forms_are_the_same(self):
+        """The premise. If these ever diverge, the field name is the least of it."""
+        import json
+
+        from core.canonical import dumps
+
+        for value in ({"b": 1, "a": "가"}, {"x": [1, 2], "y": None}, {"n": 1.5}):
+            assert dumps(value) == json.dumps(value, ensure_ascii=False,
+                                              sort_keys=True, separators=(",", ":"))
