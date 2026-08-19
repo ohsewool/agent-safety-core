@@ -118,7 +118,7 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 
 ## 남은 작업
 
-- 외부 witness의 배포 형태 결정 (transparency log / 객체 스토리지 버저닝 / 제3자)
+- 계약을 만족하는 참조 witness 서버는 제공하지 않는다 — 두면 그것이 사실상 벤더가 되어 ADR-003의 결정이 무의미해진다
 
 근거 문서: `docs/ADR-001`, `docs/ADR-002`, `docs/threat-model-and-non-goals.md`, `benchmark/README.md`.
 
