@@ -85,9 +85,20 @@ def _bodies(events: Iterable[Mapping[str, Any]]) -> Iterator[dict[str, Any]]:
 
 @dataclass(frozen=True)
 class Violation:
+    """One thing wrong with an export, and which thing.
+
+    `reason` is for a person. `kind` is for the code that has to decide what to
+    do, because these failures are not interchangeable: a malformed line is a
+    corrupt file, a broken chain is tampering, and a ledger event missing from
+    the export is a stale copy of an intact record. Telling them apart used to
+    mean matching on the sentence - including in this repository's own tests,
+    which is the signal that made it worth fixing.
+    """
+
     line: int
     reason: str
     detail: str = ""
+    kind: str = "unclassified"
 
 
 @dataclass(frozen=True)
@@ -127,26 +138,28 @@ def verify_export(source: Path | str) -> VerificationReport:
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
-            violations.append(Violation(number, "record is not valid JSON"))
+            violations.append(Violation(number, "record is not valid JSON", kind="malformed_line"))
             break  # the chain cannot continue past an unreadable record
         integrity = record.pop("integrity", None)
         if not isinstance(integrity, dict):
-            violations.append(Violation(number, "record has no integrity block"))
+            violations.append(Violation(number, "record has no integrity block", kind="missing_integrity"))
             break
         if integrity.get("previous_hash") != previous:
             violations.append(
                 Violation(number, "chain is broken",
-                          "a record was inserted, removed, or reordered here")
+                          "a record was inserted, removed, or reordered here",
+                          kind="chain_broken")
             )
         expected = _event_hash(record, integrity.get("previous_hash", ""))
         if integrity.get("event_hash") != expected:
-            violations.append(Violation(number, "record content was modified"))
+            violations.append(Violation(number, "record content was modified", kind="content_modified"))
         sequence = record.get("sequence")
         if isinstance(sequence, int):
             if last_sequence is not None and sequence <= last_sequence:
                 violations.append(
                     Violation(number, "sequence is not increasing",
-                              f"{last_sequence} then {sequence}")
+                              f"{last_sequence} then {sequence}",
+                              kind="sequence_regressed")
                 )
             last_sequence = sequence
         previous = integrity.get("event_hash", "")
@@ -191,10 +204,12 @@ def reconcile_with_ledger(source: Path | str, ledger: Any) -> VerificationReport
     in_ledger = {key(body) for body in _bodies(ledger.events())}
 
     extra_violations = [
-        Violation(line=0, reason=f"ledger event absent from the export: {missing}")
+        Violation(line=0, reason=f"ledger event absent from the export: {missing}",
+                  kind="missing_from_export")
         for missing in sorted(in_ledger - in_journal, key=str)
     ] + [
-        Violation(line=0, reason=f"export record not present in the ledger: {found}")
+        Violation(line=0, reason=f"export record not present in the ledger: {found}",
+                  kind="absent_from_ledger")
         for found in sorted(in_journal - in_ledger, key=str)
     ]
     # The report is immutable, which is the right shape for a verdict - so a

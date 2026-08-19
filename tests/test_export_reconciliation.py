@@ -97,8 +97,8 @@ class TestAStaleExportIsCaught:
         export_ledger(ledger, journal)
         ledger.claim_lease(lease, scope_digest=SCOPE)
 
-        reasons = " ".join(v.reason for v in reconcile_with_ledger(journal, ledger).violations)
-        assert "absent from the export" in reasons
+        kinds = {v.kind for v in reconcile_with_ledger(journal, ledger).violations}
+        assert kinds == {"missing_from_export"}
 
 
 class TestAnInventedRecordIsCaught:
@@ -115,8 +115,8 @@ class TestAnInventedRecordIsCaught:
         export_ledger(first, journal)
         first.close()
 
-        reasons = " ".join(v.reason for v in reconcile_with_ledger(journal, ledger).violations)
-        assert "not present in the ledger" in reasons
+        kinds = {v.kind for v in reconcile_with_ledger(journal, ledger).violations}
+        assert "absent_from_ledger" in kinds
 
     def test_the_two_directions_are_worded_differently(self, ledger, tmp_path):
         execution_id, lease = approved(ledger)
@@ -124,9 +124,8 @@ class TestAnInventedRecordIsCaught:
         export_ledger(ledger, journal)
         ledger.claim_lease(lease, scope_digest=SCOPE)
 
-        stale = " ".join(v.reason for v in reconcile_with_ledger(journal, ledger).violations)
-        assert "absent from the export" in stale
-        assert "not present in the ledger" not in stale
+        kinds = {v.kind for v in reconcile_with_ledger(journal, ledger).violations}
+        assert kinds == {"missing_from_export"}, "a stale copy is not an invented record"
 
 
 class TestTheReportStaysImmutable:
@@ -140,3 +139,57 @@ class TestTheReportStaysImmutable:
         reconciled = reconcile_with_ledger(journal, ledger)
         assert plain.violations == ()
         assert reconciled is not plain
+
+
+class TestEachViolationSaysWhichKind:
+    """A malformed line, a broken chain and a stale copy are not
+    interchangeable: one is a corrupt file, one is tampering, one is an intact
+    record someone is showing late. Distinguishing them meant matching on the
+    sentence - including in the tests above, which is the signal that made this
+    worth doing.
+    """
+
+    def _journal(self, ledger, tmp_path):
+        approved(ledger)
+        path = tmp_path / "journal.jsonl"
+        export_ledger(ledger, path)
+        return path
+
+    def test_an_unreadable_line_is_named(self, ledger, tmp_path):
+        journal = self._journal(ledger, tmp_path)
+        journal.write_text("{ not json\n", encoding="utf-8")
+        assert verify_export(journal).violations[0].kind == "malformed_line"
+
+    def test_a_record_without_integrity_is_named(self, ledger, tmp_path):
+        journal = self._journal(ledger, tmp_path)
+        journal.write_text('{"sequence": 1}\n', encoding="utf-8")
+        assert verify_export(journal).violations[0].kind == "missing_integrity"
+
+    def test_a_tampered_record_is_named(self, ledger, tmp_path):
+        import json
+
+        journal = self._journal(ledger, tmp_path)
+        lines = [line for line in journal.read_text(encoding="utf-8").splitlines() if line]
+        first = json.loads(lines[0])
+        first["actor_id"] = "someone-else"
+        journal.write_text(json.dumps(first) + "\n", encoding="utf-8")
+
+        kinds = {v.kind for v in verify_export(journal).violations}
+        assert "content_modified" in kinds
+
+    def test_a_clean_export_has_no_violations_to_classify(self, ledger, tmp_path):
+        journal = self._journal(ledger, tmp_path)
+        assert verify_export(journal).violations == ()
+
+    def test_nothing_falls_through_unclassified(self, ledger, tmp_path):
+        """Every violation this module raises is named. An `unclassified` here
+        would mean a new failure mode arrived without anyone deciding what it
+        is."""
+        import json
+
+        journal = self._journal(ledger, tmp_path)
+        lines = [line for line in journal.read_text(encoding="utf-8").splitlines() if line]
+        journal.write_text(lines[-1] + "\n", encoding="utf-8")   # chain now starts mid-way
+
+        for violation in verify_export(journal).violations:
+            assert violation.kind != "unclassified", violation.reason
