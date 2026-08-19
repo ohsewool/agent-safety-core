@@ -1,5 +1,7 @@
 # Agent Execution Safety & Evidence Core
 
+[![tests](https://github.com/ohsewool/agent-safety-core/actions/workflows/tests.yml/badge.svg)](https://github.com/ohsewool/agent-safety-core/actions/workflows/tests.yml)
+
 > 작업명 — 최종 명칭 미정. 이 저장소는 어떤 법률 준수도 보장하지 않으며, 기록은 위변조 **탐지 가능**(tamper-evident)일 뿐 위변조 불가능이 아니다.
 
 AI 에이전트가 실제 부작용을 일으키는 작업(결제, 파일 쓰기, 외부 API 호출)을 할 때, **승인된 것만 정확히 한 번 실행되게 하고 그 사실을 나중에 증명할 수 있게** 하는 런타임 코어.

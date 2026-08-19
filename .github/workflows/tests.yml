@@ -1,0 +1,42 @@
+# Tests do not prove anything if they quietly stop running.
+#
+# Every job below asserts how many tests were collected. A dependency that
+# vanishes turns importorskip into a silent pass: this repository would go from
+# 177 tests to 151 and still show green. The count is the difference between
+# "the tests passed" and "the tests ran".
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install pytest cryptography
+
+      - name: Refuse a silently shrinking suite
+        run: |
+          collected=$(python -m pytest --collect-only -q 2>/dev/null \
+            | grep -oE '[0-9]+ tests? collected' | grep -oE '^[0-9]+')
+          echo "collected $collected, expecting at least 288"
+          if [ "${collected:-0}" -lt 288 ]; then
+            echo "::error::only $collected tests collected; expected at least 288."
+            echo "Something is being skipped that should be running."
+            exit 1
+          fi
+
+      - name: Run the suite
+        run: python -m pytest -q
