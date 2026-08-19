@@ -38,5 +38,19 @@ jobs:
             exit 1
           fi
 
+      - name: Refuse a README that miscounts its own tests
+        run: |
+          # These numbers were hand-maintained and drifted twice - the second
+          # time in a repository whose README I had just verified. A count kept
+          # by hand is a count that rots, so CI compares them.
+          claimed=$(grep -oE '[0-9]+ tests' README.md | head -1 | grep -oE '^[0-9]+')
+          collected=$(python -m pytest --collect-only -q 2>/dev/null \
+            | grep -oE '[0-9]+ tests? collected' | grep -oE '^[0-9]+')
+          echo "README says ${claimed:-none}, pytest collects ${collected:-none}"
+          if [ "${claimed:-0}" != "${collected:-1}" ]; then
+            echo "::error::README claims ${claimed} tests; ${collected} are collected."
+            exit 1
+          fi
+
       - name: Run the suite
         run: python -m pytest -q -rs   # -rs names every skip and why
