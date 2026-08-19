@@ -3,3 +3,4 @@ cryptography>=42        # Ed25519 checkpoints, AES-256-GCM payload encryption
 
 # Tests
 pytest>=8
+jsonschema>=4           # event-record schema tests; without it five of them skip
