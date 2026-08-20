@@ -43,7 +43,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 345 tests
+python3 -m pytest tests/ -q          # 360 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -102,7 +102,7 @@ charge(amount=9999, payee="m1", _lease=lease)    # LeaseRefused — 승인된 �
 
 v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITICAL 3건 — 승인 scope에 실행 컨텍스트가 없어 코드가 바뀌어도 통과, lease 검증과 소비가 원자적이지 않아 두 워커가 동시 통과, 저널과 lease 원장 사이에 트랜잭션 경계가 없어 "권한은 썼는데 증적이 없는" 상태 도달 가능 — 은 전부 "JSONL 저널이 진실"이라는 모델의 구조적 결함이었다.
 
-`docs/ADR-002`가 그 재설계다: SQLite 트랜잭션 원장을 system of record로 삼고 해시 체인 저널을 export로 강등했다. `tests/test_ledger.py`가 각 finding을 닫으며, 그중 하나는 **24개 스레드가 같은 lease를 동시에 노려도 dispatch가 정확히 1회**임을 확인한다.
+[`docs/ADR-002`](docs/ADR-002-execution-safety-state-model.md)가 그 재설계다: SQLite 트랜잭션 원장을 system of record로 삼고 해시 체인 저널을 export로 강등했다. `tests/test_ledger.py`가 각 finding을 닫으며, 그중 하나는 **24개 스레드가 같은 lease를 동시에 노려도 dispatch가 정확히 1회**임을 확인한다.
 
 ## 권한 분리 (`core/access.py`)
 
@@ -120,7 +120,7 @@ v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITI
 
 - 계약을 만족하는 참조 witness 서버는 제공하지 않는다 — 두면 그것이 사실상 벤더가 되어 ADR-003의 결정이 무의미해진다
 
-근거 문서: `docs/ADR-001`, `docs/ADR-002`, `docs/threat-model-and-non-goals.md`, `benchmark/README.md`.
+근거 문서: [ADR-001](docs/ADR-001-module-boundaries.md), [ADR-002](docs/ADR-002-execution-safety-state-model.md), [ADR-003](docs/ADR-003-witness-deployment.md), [위협 모델](docs/threat-model-and-non-goals.md), [PACKAGING](docs/PACKAGING.md), [벤치마크](benchmark/README.md).
 
 ## 라이선스
 
