@@ -24,6 +24,7 @@ maintained. Stale-by-declaration is a record; stale-by-accident is a defect.
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -38,10 +39,37 @@ HISTORICAL = re.compile(r"<!--\s*historical:")
 
 
 def documents():
-    return [
-        path for path in sorted(ROOT.rglob("*.md"))
-        if not SKIP_DIRECTORIES & set(path.relative_to(ROOT).parts)
-    ]
+    """The documents this repository ships, asked of git rather than the disk.
+
+    `rglob` found the sibling repositories that CI checks out under
+    `.sibling/`, so the number of parametrised cases changed depending on which
+    job was running - and the README-count check caught it as 225 collected
+    against 216 claimed. A test whose count depends on what else happens to be
+    on disk is a test that cannot be counted.
+
+    Falling back to a walk when git is unavailable, with nested checkouts
+    pruned: a directory holding its own `.git` belongs to another repository
+    and its documents are not this one's claims.
+    """
+    try:
+        listed = subprocess.run(["git", "ls-files", "*.md", "**/*.md"], cwd=ROOT,
+                                capture_output=True, text=True, timeout=30)
+        if listed.returncode == 0 and listed.stdout.strip():
+            return sorted(
+                ROOT / name for name in set(listed.stdout.split())
+                if not SKIP_DIRECTORIES & set(Path(name).parts) and (ROOT / name).exists()
+            )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    found = []
+    for path in sorted(ROOT.rglob("*.md")):
+        parts = path.relative_to(ROOT).parts
+        if SKIP_DIRECTORIES & set(parts):
+            continue
+        if any((ROOT.joinpath(*parts[:i]) / ".git").exists() for i in range(1, len(parts))):
+            continue
+        found.append(path)
+    return found
 
 
 def references(text):
