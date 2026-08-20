@@ -88,9 +88,26 @@ def missing_in(path):
             if not (ROOT / reference).exists() and not (path.parent / reference).exists()]
 
 
-@pytest.mark.parametrize("path", documents(), ids=lambda p: str(p.relative_to(ROOT)))
-def test_every_path_a_document_names_is_there(path):
-    assert missing_in(path) == []
+def test_every_path_a_document_names_is_there():
+    """한 문서에 테스트 하나가 아니라, 한 성질에 테스트 하나다.
+
+    처음에는 문서마다 파라미터를 걸었다 - 어느 문서가 걸렸는지 pytest가 이름으로
+    알려주니까. 그러면 문서를 하나 더 쓸 때마다 테스트 수가 늘어난다. 검사하는
+    성질은 그대로인데. 이 저장소들은 README가 주장하는 테스트 수를 CI가 실제
+    수집 개수와 대조하는데, **그 숫자가 뜻을 가지려면 내가 먼저 부풀리지 말아야
+    한다.** 다섯 저장소에서 119개가 그렇게 늘어 있었다.
+
+    어느 문서인지는 실패 메시지가 말한다. 파라미터 이름이 해주던 일이고, 그것
+    때문에 개수를 왜곡할 이유는 없다.
+    """
+    offenders = []
+    for path in documents():
+        for reference in missing_in(path):
+            offenders.append(f"{path.relative_to(ROOT)} → {reference}")
+    assert not offenders, (
+        "없는 곳을 가리키는 참조:\n  " + "\n  ".join(offenders)
+        + "\n현재 안내라면 경로를 고치고, 과거 기록이라면 <!-- historical: 시점 -->으로 선언하라."
+    )
 
 
 class TestTheCheckIsNotVacuous:
