@@ -4,3 +4,10 @@ __pycache__/
 *.db
 *.db-wal
 *.db-shm
+
+# 커버리지 산출물. 거부 분기를 훑는 감사를 돌리다 다섯 저장소 전부에
+# 커밋됐다 - 매 실행마다 내용이 바뀌는 53KB 바이너리라 diff에
+# 잡히지 않고 조용히 따라 들어온다.
+.coverage
+.coverage.*
+htmlcov/
