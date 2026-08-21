@@ -90,6 +90,14 @@ untrusted 입력은 파싱 단계에서 다음을 강제한다.
 - **lease claim**: `UPDATE ... WHERE state='APPROVED' AND lease_id=?`의 영향 행 수로 CAS 판정. 1이면 획득, 0이면 이미 소비. 트랜잭션 커밋 후에만 외부 호출로 진행한다.
 - **저널 직렬화**: `sequence`는 저장소가 단일 authority로 발급한다(AUTOINCREMENT). 다중 프로세스가 같은 tip을 읽고 분기하는 F-04 시나리오가 구조적으로 불가능해진다.
   **(2026-08-21 실측)** 이 문장은 프로세스에 대해 말하는데 동시성 테스트는 전부 스레드였다 — 한 프로세스 안의 스레드는 연결을 공유하고 GIL이 상당 부분을 직렬화하므로 각자 연결을 열고 OS 파일 락으로 경쟁하는 것과 다른 상황이다. **더 어려운 쪽이 시험되지 않은 쪽이었다.** 프로세스 6개 × 12회로 재보니 sequence 144개가 전부 고유하고 빈틈이 없으며, 8개가 같은 lease를 노려도 정확히 하나만 획득하고, export한 체인이 검증을 통과한다. 주장은 성립한다. `tests/test_multiprocess_ledger.py`가 고정한다.
+- **거절도 기록한다**(2026-08-22 추가): `approve`와 `reconcile`의 거절은 아무 이벤트도
+  남기지 않았다. `_transaction`이 예외에 ROLLBACK하는데 두 함수는 `raise`로 빠져나가
+  이벤트가 거절과 함께 사라졌기 때문이다 — `claim_lease`는 `return None`으로 빠져나가
+  `claim_refused`가 살아남았다. **같은 종류의 거절인데 한쪽만 기록됐다.** 자기승인 5회 +
+  범위 불일치 3회 뒤에도 이벤트는 `created` 하나뿐이었다. 지금은 `approve_refused`·
+  `reconcile_refused`를 거절 **뒤에 따로 연 트랜잭션**에서 남긴다. 검사와 쓰기는 한
+  트랜잭션 안에 그대로 있다 — 기록하려고 쪼갰다가 동시 승인 원자성을 깨뜨렸고
+  `test_concurrent_approvals_issue_exactly_one`이 잡아냈다.
 - **주체 동일성**(2026-08-22 추가): `actor_id`·`approver_id`·`revoker_id`·`reconciler_id`는
   NFKC → strip → casefold로 정규화하고 ASCII 부분집합(`a-z0-9._-:@+`)만 허용한다.
   전에는 `==` 원문 비교였고, **에이전트는 자기 `approver_id`를 스스로 고르므로**

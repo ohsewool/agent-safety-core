@@ -226,6 +226,29 @@ class ExecutionLedger:
 
     # ------------------------------------------------------------------ writes
 
+    def _record_refusal(self, execution_id: str, kind: str, from_state: str | None,
+                        detail: Mapping[str, Any]) -> None:
+        """거절을 남긴다. **거절한 뒤에, 따로 연 트랜잭션에서.**
+
+        `_transaction`은 예외가 나면 ROLLBACK한다 — 그래서 거절과 함께 쓴 이벤트는
+        거절과 함께 사라진다. `claim_lease`는 이벤트를 쓰고 **`return None`**으로
+        빠져나가기 때문에 살아남았고, `approve`와 `reconcile`은 `raise`로 빠져나가
+        아무것도 남지 않았다. **같은 종류의 거절인데 한쪽만 기록됐다.**
+
+        2026-08-22에 쟀다: 자기승인 5회 + 범위 불일치 3회, 총 8번의 거절 뒤에도
+        이벤트는 `created` 하나뿐이었다. 지난 회차에 시연한 자기승인 우회 탐색
+        (`Agent-1`·` agent-1`·`agent\u20111`)도 그러니 아무 흔적을 남기지 않았을
+        것이다. **거절당한 시도야말로 기록이 존재하는 이유다.**
+
+        기록에 실패해도 거절 자체는 유지한다 — 남기지 못한 것이 통과시킬 이유는
+        되지 않는다. 다만 조용히 넘어가지 않는다.
+        """
+        try:
+            with self._transaction() as connection:
+                self._append_event(connection, execution_id, kind, from_state, None, detail)
+        except Exception as exc:  # pragma: no cover - 기록 실패는 재현이 어렵다
+            print(f"[ledger] {kind} 이벤트를 남기지 못했다: {exc}")
+
     def create(self, *, run_id: str, actor_id: str, tool_id: str, operation: str,
                scope_digest: str) -> str:
         """Record an intent. The core issues the identity; callers cannot supply it."""
@@ -281,30 +304,42 @@ class ExecutionLedger:
             raise LedgerError("ttl_seconds must be greater than zero")
         lease_id = uuid.uuid4().hex
         expires_at = self._clock() + ttl
+        refusal = None
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT state, scope_digest, actor_id FROM executions WHERE execution_id=?",
                 (execution_id,),
             ).fetchone()
             if row is None:
+                # 실행이 없으면 이벤트를 붙일 곳도 없다(events.execution_id는 FK다).
                 raise LedgerError("unknown execution")
             if row["state"] != CREATED:
-                raise LedgerError(f"cannot approve from state {row['state']}")
-            if row["scope_digest"] != scope_digest:
-                raise LedgerError("scope digest does not match the recorded intent")
-            if row["actor_id"] == approver_id:
-                raise LedgerError(
-                    "self-approval refused: the actor that requested this execution "
-                    "cannot also approve it"
+                refusal = ("wrong_state", f"cannot approve from state {row['state']}")
+            elif row["scope_digest"] != scope_digest:
+                refusal = ("scope_mismatch",
+                           "scope digest does not match the recorded intent")
+            elif row["actor_id"] == approver_id:
+                refusal = ("self_approval",
+                           "self-approval refused: the actor that requested this execution "
+                           "cannot also approve it")
+            # **검사와 쓰기는 한 트랜잭션 안에 있어야 한다.** 처음 고칠 때 거절을
+            # 기록하려고 두 트랜잭션으로 쪼갰다가 동시 승인 원자성을 깨뜨렸고,
+            # `test_concurrent_approvals_issue_exactly_one`이 2를 세면서 잡아냈다.
+            # 거절 기록만 밖에서 한다 - 그쪽은 원자적일 필요가 없다.
+            if refusal is None:
+                connection.execute(
+                    "UPDATE executions SET state=?, lease_id=?, expires_at=?, approved_at=?"
+                    " WHERE execution_id=?",
+                    (APPROVED, lease_id, expires_at, self._clock(), execution_id),
                 )
-            connection.execute(
-                "UPDATE executions SET state=?, lease_id=?, expires_at=?, approved_at=?"
-                " WHERE execution_id=?",
-                (APPROVED, lease_id, expires_at, self._clock(), execution_id),
-            )
-            self._append_event(connection, execution_id, "approved", CREATED, APPROVED,
-                               {"approver_id": approver_id, "lease_id": lease_id,
-                                "expires_at": expires_at})
+                self._append_event(connection, execution_id, "approved", CREATED, APPROVED,
+                                   {"approver_id": approver_id, "lease_id": lease_id,
+                                    "expires_at": expires_at})
+        if refusal is not None:
+            reason, message = refusal
+            self._record_refusal(execution_id, "approve_refused", row["state"],
+                                 {"reason": reason, "approver_id": approver_id})
+            raise LedgerError(message)
         return lease_id
 
     def claim_lease(self, lease_id: str, *, scope_digest: str) -> str | None:
@@ -394,23 +429,31 @@ class ExecutionLedger:
         an agent from deciding on its own what happened.
         """
         reconciler_id = normalize_principal(reconciler_id, field="reconciler_id")
+        refusal = None
         if new_state not in {SUCCEEDED, FAILED, PERMANENTLY_UNRESOLVED}:
             raise LedgerError(f"illegal reconciliation target {new_state}")
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT state, actor_id FROM executions WHERE execution_id=?", (execution_id,)
             ).fetchone()
-            if row is None or row["state"] != UNKNOWN:
+            if row is None:
                 raise LedgerError("reconciliation requires an UNKNOWN execution")
-            if row["actor_id"] == reconciler_id:
-                raise LedgerError(
-                    "self-reconciliation refused: the actor whose execution ended "
-                    "UNKNOWN cannot be the one who declares how it ended"
-                )
-            connection.execute("UPDATE executions SET state=? WHERE execution_id=?",
-                               (new_state, execution_id))
-            self._append_event(connection, execution_id, "reconciled", UNKNOWN, new_state,
-                               {"reconciler_id": reconciler_id, **dict(evidence)})
+            if row["state"] != UNKNOWN:
+                refusal = ("wrong_state", "reconciliation requires an UNKNOWN execution")
+            elif row["actor_id"] == reconciler_id:
+                refusal = ("self_reconciliation",
+                           "self-reconciliation refused: the actor whose execution ended "
+                           "UNKNOWN cannot be the one who declares how it ended")
+            else:
+                connection.execute("UPDATE executions SET state=? WHERE execution_id=?",
+                                   (new_state, execution_id))
+                self._append_event(connection, execution_id, "reconciled", UNKNOWN, new_state,
+                                   {"reconciler_id": reconciler_id, **dict(evidence)})
+        if refusal is not None:
+            reason, message = refusal
+            self._record_refusal(execution_id, "reconcile_refused", row["state"],
+                                 {"reason": reason, "reconciler_id": reconciler_id})
+            raise LedgerError(message)
 
     def recover_interrupted(self, *, all_dispatchers: bool = False) -> tuple[str, ...]:
         """Reclassify *this* dispatcher's interrupted dispatches as UNKNOWN.
