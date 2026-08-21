@@ -89,6 +89,7 @@ untrusted 입력은 파싱 단계에서 다음을 강제한다.
 
 - **lease claim**: `UPDATE ... WHERE state='APPROVED' AND lease_id=?`의 영향 행 수로 CAS 판정. 1이면 획득, 0이면 이미 소비. 트랜잭션 커밋 후에만 외부 호출로 진행한다.
 - **저널 직렬화**: `sequence`는 저장소가 단일 authority로 발급한다(AUTOINCREMENT). 다중 프로세스가 같은 tip을 읽고 분기하는 F-04 시나리오가 구조적으로 불가능해진다.
+  **(2026-08-21 실측)** 이 문장은 프로세스에 대해 말하는데 동시성 테스트는 전부 스레드였다 — 한 프로세스 안의 스레드는 연결을 공유하고 GIL이 상당 부분을 직렬화하므로 각자 연결을 열고 OS 파일 락으로 경쟁하는 것과 다른 상황이다. **더 어려운 쪽이 시험되지 않은 쪽이었다.** 프로세스 6개 × 12회로 재보니 sequence 144개가 전부 고유하고 빈틈이 없으며, 8개가 같은 lease를 노려도 정확히 하나만 획득하고, export한 체인이 검증을 통과한다. 주장은 성립한다. `tests/test_multiprocess_ledger.py`가 고정한다.
 - **만료 판정**: 런타임 TTL은 monotonic clock 기준. wall clock 역행이 감지되면 security-sensitive lease는 fail-closed. 재시작 후에는 persisted expiry + boot/session identity로 판정한다.
 
 ## 7. 증적과 무결성 (F-12·F-13 해소)
