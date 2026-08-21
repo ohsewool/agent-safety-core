@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -72,6 +73,58 @@ CREATE TABLE IF NOT EXISTS clock_state (
 
 class LedgerError(RuntimeError):
     """Raised when a caller attempts an illegal transition."""
+
+
+PRINCIPAL_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz0123456789._-:@+"
+)
+
+
+def normalize_principal(value: object, *, field: str) -> str:
+    """The one spelling of an actor, approver, revoker or reconciler.
+
+    The separation-of-duty checks compared these strings with ``==`` on whatever
+    the caller passed. An agent picks its own ``approver_id``, so the whole
+    control came down to spelling. Measured 2026-08-22 against an execution
+    requested by ``agent-1``:
+
+    ============================  ==================
+    ``approver_id``               result
+    ============================  ==================
+    ``"agent-1"``                 refused
+    ``"Agent-1"``                 **approved**
+    ``" agent-1"``                **approved**
+    ``"agent-1\n"``               **approved**
+    ``"agent\u20111"``            **approved**
+    ============================  ==================
+
+    Every row but the first is the same principal wearing a different hat. Both
+    `self-approval refused` and `self-reconciliation refused` were bypassable by
+    capitalising one letter.
+
+    Normalising is the safe direction on its own - it can only make the refusal
+    broader, never narrower. It is not enough by itself: NFKC does **not** fold
+    ``\u2011`` (non-breaking hyphen) to ASCII ``-``, so a look-alike would still
+    read as a different principal. So the character set is restricted as well,
+    the way ``mcp-gateway``'s ``_valid_identifier`` already does it.
+
+    The cost is that a principal id must be ASCII-safe. For a machine-to-machine
+    identity in a ledger that is the right trade; a human-readable display name
+    belongs somewhere that is not used for comparison.
+    """
+    if not isinstance(value, str):
+        raise LedgerError(f"{field} must be a string")
+    folded = unicodedata.normalize("NFKC", value).strip().casefold()
+    if not folded:
+        raise LedgerError(f"{field} must not be empty")
+    bad = sorted({character for character in folded if character not in PRINCIPAL_CHARS})
+    if bad:
+        raise LedgerError(
+            f"{field} may only contain {''.join(sorted(PRINCIPAL_CHARS))}; "
+            f"refused {bad!r} - a look-alike character is a different principal "
+            f"to a comparison and the same one to a reader"
+        )
+    return folded
 
 
 @dataclass(frozen=True)
@@ -176,6 +229,7 @@ class ExecutionLedger:
     def create(self, *, run_id: str, actor_id: str, tool_id: str, operation: str,
                scope_digest: str) -> str:
         """Record an intent. The core issues the identity; callers cannot supply it."""
+        actor_id = normalize_principal(actor_id, field="actor_id")
         execution_id = uuid.uuid4().hex
         with self._transaction() as connection:
             connection.execute(
@@ -216,6 +270,7 @@ class ExecutionLedger:
 
         A lease is single-use *and* time-bounded. Half of that is not the control.
         """
+        approver_id = normalize_principal(approver_id, field="approver_id")
         ttl = ttl_seconds
         if isinstance(ttl, bool) or not isinstance(ttl, (int, float, Decimal)):
             raise LedgerError("ttl_seconds must be a number")
@@ -300,6 +355,7 @@ class ExecutionLedger:
 
     def revoke(self, execution_id: str, *, revoker_id: str, reason: str) -> bool:
         """Revoke an approval before dispatch. Expiry and revocation are distinct."""
+        revoker_id = normalize_principal(revoker_id, field="revoker_id")
         with self._transaction() as connection:
             changed = connection.execute(
                 "UPDATE executions SET state=? WHERE execution_id=? AND state IN (?,?)",
@@ -337,6 +393,7 @@ class ExecutionLedger:
         SUCCEEDED and move on - which is precisely the state that exists to stop
         an agent from deciding on its own what happened.
         """
+        reconciler_id = normalize_principal(reconciler_id, field="reconciler_id")
         if new_state not in {SUCCEEDED, FAILED, PERMANENTLY_UNRESOLVED}:
             raise LedgerError(f"illegal reconciliation target {new_state}")
         with self._transaction() as connection:
