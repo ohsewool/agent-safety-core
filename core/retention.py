@@ -116,11 +116,25 @@ class RetentionSchedule:
         return rule
 
     def decide(self, payload_id: str, *, retention_class: str, created_at: float,
-               on_hold: bool = False) -> RetentionDecision:
+               on_hold: bool = False, now: float | None = None) -> RetentionDecision:
+        """`now` lets the caller supply the clock that produced `created_at`.
+
+        Without it this schedule reads its own clock, and `created_at` comes from
+        whoever stored the payload. Two clocks answering one question is the
+        shape this project keeps finding, and here it fails open: a store given a
+        test clock and a schedule left on wall time compared a timestamp of 1000
+        against 2026, concluded the period had long elapsed, and allowed a
+        payload under a **ten-year** class to be destroyed at once. Measured
+        2026-08-22.
+
+        In production both default to `time.time()` and agree, so the failure
+        only appears where time is controlled - tests, replays, a frozen-clock
+        deployment. That is precisely where a retention control gets exercised.
+        """
         rule = self.get(retention_class)
         eligible_at = rule.eligible_at(created_at)
         due_at = rule.due_at(created_at)
-        now = self._clock()
+        now = self._clock() if now is None else now
 
         if on_hold:
             # Reported in both directions: a hold that outlives the schedule is a
@@ -168,10 +182,11 @@ class RetentionSchedule:
         )
 
     def require_destroyable(self, payload_id: str, *, retention_class: str,
-                            created_at: float, on_hold: bool = False) -> RetentionDecision:
+                            created_at: float, on_hold: bool = False,
+                            now: float | None = None) -> RetentionDecision:
         """Raise unless this payload may be destroyed right now."""
         decision = self.decide(payload_id, retention_class=retention_class,
-                               created_at=created_at, on_hold=on_hold)
+                               created_at=created_at, on_hold=on_hold, now=now)
         if not decision.may_destroy:
             raise RetentionError(f"{payload_id} may not be destroyed: {decision.reason}")
         return decision

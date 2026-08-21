@@ -186,6 +186,11 @@ class PayloadStore:
                         reference.payload_id, reference.retention_class),
                     created_at=created_at,
                     on_hold=self.on_hold(reference.payload_id),
+                    # **이 저장소의 시계로 판단한다.** `created_at`은 여기서 나온
+                    # 값이고, 비교하는 "지금"이 다른 시계에서 오면 두 시각은 서로
+                    # 아무 관계가 없다. schedule에 시계를 주지 않은 호출자에게는
+                    # 10년 보존 클래스가 즉시 파기를 허용했다(2026-08-22 실측).
+                    now=self._clock(),
                 )
             except Exception as error:
                 raise PayloadError(str(error)) from error
