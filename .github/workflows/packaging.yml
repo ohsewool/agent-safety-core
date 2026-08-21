@@ -1,0 +1,56 @@
+# README의 첫 줄은 `pip install`인데, 어떤 CI도 그걸 돌린 적이 없었다.
+#
+# 다섯 저장소의 CI는 전부 `requirements.txt`만 설치하고 저장소 자신은 설치하지
+# 않는다. 테스트는 `conftest.py`가 `src/`를 경로에 넣어 주니 통과하고, 그래서
+# **패키징이 깨져도 초록불이 유지된다.** 실제로 최근에 어댑터 하나를 패키지 안으로
+# 옮겼는데, `packages.find`가 새 하위 패키지를 빠뜨렸어도 아무도 몰랐을 것이다.
+#
+# 이 잡은 체크아웃이 아니라 **설치본**을 import한다. 그게 이 검사의 전부다 -
+# 체크아웃에서 import되면 아무것도 증명하지 못하므로, 불러온 파일이 작업
+# 디렉터리 밖에 있는지 먼저 확인한다.
+
+name: packaging
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install the way the README says
+        run: pip install .
+
+      - name: Import the installed package, not the checkout
+        # 작업 디렉터리를 벗어나 실행한다. 저장소 안에서 물으면 체크아웃이 답을
+        # 주고, 설치가 완전히 망가져 있어도 통과한다.
+        working-directory: /tmp
+        run: |
+          python - <<'PY'
+          import importlib, os, sys
+
+          workspace = os.path.realpath(os.environ["GITHUB_WORKSPACE"])
+          missing = []
+          for name in ['core', 'core.ledger', 'core.export', 'adapters', 'profiles']:
+              module = importlib.import_module(name)
+              path = os.path.realpath(getattr(module, "__file__", "") or "")
+              if not path:
+                  missing.append(f"{name}: 파일 경로가 없다 (namespace 패키지?)")
+              elif path.startswith(workspace):
+                  missing.append(f"{name}: 체크아웃에서 왔다 - {path}")
+              else:
+                  print(f"ok  {name}  {path}")
+          if missing:
+              print("::error::" + "; ".join(missing))
+              sys.exit(1)
+          PY
