@@ -18,10 +18,12 @@ not have happened.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Iterator, Mapping
 
 CREATED = "CREATED"
@@ -196,9 +198,34 @@ class ExecutionLedger:
         approve its own request by passing its own id - the whole control was a
         docstring. The check that needs no configuration is made unconditional:
         the requester is already on the row.
+
+        `ttl_seconds` must be a finite number above zero. It was not checked, and
+        two degenerate values produced a lease that never expires - the most
+        permissive outcome reachable through this call:
+
+        ``nan``
+            ``now + nan`` is ``nan``, SQLite stores that as NULL, and NULL is how
+            this schema spells "no expiry". A lease meant to last a minute lasted
+            forever, and nothing in the row said anything was wrong.
+        ``inf``
+            ``now > inf`` is never true, so the expiry branch cannot fire.
+
+        Neither is exotic to produce: a TTL read from configuration, divided, or
+        parsed from text arrives as a float like any other. Measured 2026-08-22 -
+        both were claimable a simulated thirty years later.
+
+        A lease is single-use *and* time-bounded. Half of that is not the control.
         """
+        ttl = ttl_seconds
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float, Decimal)):
+            raise LedgerError("ttl_seconds must be a number")
+        ttl = float(ttl)
+        if not math.isfinite(ttl):
+            raise LedgerError("ttl_seconds must be finite: a lease that cannot expire is not a lease")
+        if ttl <= 0:
+            raise LedgerError("ttl_seconds must be greater than zero")
         lease_id = uuid.uuid4().hex
-        expires_at = self._clock() + ttl_seconds
+        expires_at = self._clock() + ttl
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT state, scope_digest, actor_id FROM executions WHERE execution_id=?",

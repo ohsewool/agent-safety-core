@@ -90,6 +90,15 @@ untrusted 입력은 파싱 단계에서 다음을 강제한다.
 - **lease claim**: `UPDATE ... WHERE state='APPROVED' AND lease_id=?`의 영향 행 수로 CAS 판정. 1이면 획득, 0이면 이미 소비. 트랜잭션 커밋 후에만 외부 호출로 진행한다.
 - **저널 직렬화**: `sequence`는 저장소가 단일 authority로 발급한다(AUTOINCREMENT). 다중 프로세스가 같은 tip을 읽고 분기하는 F-04 시나리오가 구조적으로 불가능해진다.
   **(2026-08-21 실측)** 이 문장은 프로세스에 대해 말하는데 동시성 테스트는 전부 스레드였다 — 한 프로세스 안의 스레드는 연결을 공유하고 GIL이 상당 부분을 직렬화하므로 각자 연결을 열고 OS 파일 락으로 경쟁하는 것과 다른 상황이다. **더 어려운 쪽이 시험되지 않은 쪽이었다.** 프로세스 6개 × 12회로 재보니 sequence 144개가 전부 고유하고 빈틈이 없으며, 8개가 같은 lease를 노려도 정확히 하나만 획득하고, export한 체인이 검증을 통과한다. 주장은 성립한다. `tests/test_multiprocess_ledger.py`가 고정한다.
+- **만료 경계**(2026-08-22 확정): `now > expires_at`이므로 **정확히 만료 시각까지 유효**하다.
+  60초 TTL은 t+60에 소비할 수 있고 t+60.001에는 못 한다. `>=`로 바꾸면 동작이 조용히
+  바뀌므로 `tests/test_lease_ttl_boundary.py`가 세 지점(직전·정확·직후)을 고정한다.
+- **TTL 입력 검증**(2026-08-22 추가): `approve`는 유한하고 0보다 큰 수만 받는다.
+  검증이 없을 때 `nan`은 `now + nan = nan` → SQLite가 NULL로 저장 → 이 스키마에서
+  NULL은 **"만료 없음"** → **영원히 소비 가능한 lease**가 됐다. `inf`는 `now > inf`가
+  참이 되지 않아 같은 결과였다. 둘 다 30년 뒤 소비되는 것을 실측했다. `bool`은
+  `int`의 하위형이라 따로 배제한다 — `NetworkConstraint`의 포트 검사가 이미 같은
+  이유로 그렇게 한다.
 - **만료 판정**: 런타임 TTL은 monotonic clock 기준. wall clock 역행이 감지되면 security-sensitive lease는 fail-closed. 재시작 후에는 persisted expiry + boot/session identity로 판정한다.
 
 ## 7. 증적과 무결성 (F-12·F-13 해소)
