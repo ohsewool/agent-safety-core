@@ -86,3 +86,37 @@ repositories; twelve were caught. A negative control was run first — harmless
 whitespace edits to the same files, confirming the probe was not simply
 failing for unrelated reasons. Without that control the twelve passes would
 have proved nothing.
+
+## Finding 8 — 경로 traversal 검사가 발동할 수 없었다
+
+커버리지로 훑었더니 `canonical.py` 85%, `scope.py` 88%였고 **실행되지 않는 줄이
+거의 전부 거부 분기**였다. 입력 정규화와 스코프가 막는다고 적어둔 것들이 한 번도
+발동한 적이 없었다. 전부 쏴봤고 **하나가 통과했다.**
+
+```python
+resolved = candidate.resolve()
+if ".." in PurePosixPath(str(resolved)).parts:
+    raise ScopeError("path escapes through traversal components")
+```
+
+`.resolve()`가 `..`를 **이미 접어 없앤 뒤에** `..`를 찾는다. `/tmp/../etc/passwd`는
+`/etc/passwd`로 접히고 `parts`에 `..`가 남지 않는다. **어떤 입력으로도 발동할 수 없는
+검사**였고, 메시지는 traversal을 거부한다고 말하고 있었다.
+
+실질적 영향은 좁다 — 해석된 경로가 실제 inode에 고정되므로 결속 자체는 정직했고,
+위험은 `requested` 문자열을 보고 판단하는 소비자에게 있다. 그러나 **검사가 있다고
+적혀 있는데 없었다**는 것이 문제다. 활성 검사처럼 보이는 죽은 코드는 없는 검사보다
+나쁘다: 없으면 사람이 조심하고, 있으면 보호받고 있다고 믿는다.
+
+형제 저장소 `mcp-gateway`는 처음부터 원시 요청에서 `..`를 거부하고 그 이유까지
+주석에 적혀 있다("해석하면 서버가 나중에 하는 것과 어긋난다"). **같은 규칙을 두 곳에
+다르게 구현했고 한쪽만 동작했다.**
+
+이제 원시 입력을 본다. `..foo`처럼 점으로 시작하는 이름은 통과한다 — 문자열에 `..`가
+들어있다는 이유로 막으면 정상 경로가 막히고, 그런 검사는 꺼진다.
+
+`tests/test_rejections.py`가 26개로 고정한다. 옛 코드로 되돌리면 4개가 실패한다.
+
+**방법 기록.** 이 결함은 코드를 읽어서가 아니라 **커버리지가 그 줄을 한 번도
+실행하지 않았다고 알려줘서** 나왔다. 그 줄을 발동시키려다 발동시킬 수 없다는 것을
+알았다. 미실행 거부 분기는 목록으로 만들어 하나씩 쏴볼 가치가 있다.

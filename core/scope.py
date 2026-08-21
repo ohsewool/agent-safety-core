@@ -76,9 +76,20 @@ def resolve_path(raw: str) -> ResourceIdentity:
     candidate = Path(raw)
     if not candidate.is_absolute():
         raise ScopeError("relative paths cannot be bound: their meaning depends on cwd")
-    resolved = candidate.resolve()
-    if ".." in PurePosixPath(str(resolved)).parts:
+    # `..`는 **해석 전** 원시 입력에서 본다. 해석 뒤에 보던 판은 발동할 수 없었다 -
+    # `.resolve()`가 `..`를 이미 접어 없애기 때문이다. `/tmp/../etc/passwd`는
+    # `/etc/passwd`로 접히고 `parts`에 `..`가 남지 않는다. 메시지는 "traversal을
+    # 거부한다"고 말하는데 실제로는 조용히 통과시키고 있었다.
+    #
+    # 커버리지가 이 줄을 한 번도 실행하지 않았다고 알려줬고, 발동시키려다 알았다.
+    # **활성 검사처럼 보이는 죽은 코드**는 없는 검사보다 나쁘다 - 읽는 사람이
+    # 보호받고 있다고 믿는다.
+    #
+    # 형제 저장소 `mcp-gateway`의 정책은 처음부터 원시 요청에서 `..`를 거부한다.
+    # 같은 규칙을 두 곳에서 다르게 구현하고 있었던 셈이다.
+    if ".." in PurePosixPath(raw).parts:
         raise ScopeError("path escapes through traversal components")
+    resolved = candidate.resolve()
     try:
         status = os.stat(resolved)
         fingerprint = f"{status.st_dev}:{status.st_ino}"
