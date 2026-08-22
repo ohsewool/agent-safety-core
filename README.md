@@ -43,7 +43,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 499 tests
+python3 -m pytest tests/ -q          # 503 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
