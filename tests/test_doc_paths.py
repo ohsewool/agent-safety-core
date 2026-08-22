@@ -194,3 +194,24 @@ def test_no_document_is_exempt():
         "의도한 기록이면 DECLARED_RECORDS에 넣어라. 아니면 산문 언급이 선언으로 "
         "읽힌 것이다."
     )
+
+
+class TestAMentionIsNotADeclaration:
+    """관례를 **설명하는 문장**이 문서를 면제시키면 안 된다.
+
+    `modelmate`에서 그 일이 벌어졌다(2026-08-22). 정규식 사본이 파일마다 있으므로
+    대조도 파일마다 있어야 한다 — 여기서 느슨하게 되돌려도 다른 파일의 대조는
+    아무 말을 하지 않는다.
+    """
+
+    def test_a_prose_mention_does_not_exempt(self):
+        assert not declared_historical(
+            "# 제목\n\n관례는 `<!-- historical: 시점 -->`으로 적는다.\n")
+
+    def test_a_real_declaration_exempts(self):
+        assert declared_historical("# 제목\n<!-- historical: 2026-06 -->\n본문\n")
+
+    def test_a_declaration_far_down_does_not_count(self):
+        """문서 끝에 붙인 표시는 선언이 아니다 — 읽는 사람은 앞을 보고 판단한다."""
+        assert not declared_historical("# 제목\n" + "본문\n" * 40
+                                       + "<!-- historical: 2026-06 -->\n")
