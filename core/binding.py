@@ -60,7 +60,12 @@ def _apply(value: Any, rule: Equivalence) -> Any:
     if isinstance(value, str):
         if rule is Equivalence.TRIMMED:
             return value.strip()
-        if rule is Equivalence.CASE_FOLDED:
+        if rule is Equivalence.CASE_FOLDED:  # pragma: no branch - the enum has no sixth rule
+            # Falling through with a string in hand would need a rule that is
+            # none of the five: EXACT, NUMERIC and UNORDERED return above, and
+            # these two return here. Measured on 2026-08-22 with branch coverage,
+            # which is stricter than the statement gate added the day before -
+            # the line ran, the arc out of it never did.
             return value.casefold()
     raise BindingError(f"{rule.value} equivalence needs a string, got {type(value).__name__}")
 

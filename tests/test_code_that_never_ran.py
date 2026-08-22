@@ -280,3 +280,51 @@ class TestTheRemainingFive:
         assert cleaned["items"][0]["token"] == "[redacted]"
         assert cleaned["items"][0]["id"] == 1
         assert removed
+
+
+class TestTheBranchesNoTestEverTook:
+    """구문 커버리지가 100%가 된 뒤에 **분기**로 다시 쟀다.
+
+    줄이 전부 실행됐다는 것과 각 `if`가 양쪽으로 다 가봤다는 것은 다르다. 어제
+    세운 관문이 그 차이를 못 본다 — 그래서 관문부터 의심했다. 네 저장소에서
+    부분 분기가 나왔고 여기는 넷이었다.
+    """
+
+    def test_appending_to_an_empty_journal_starts_a_chain(self, tmp_path):
+        """파일은 있는데 내용이 없는 경우. 없는 파일과 빈 파일을 같게 다루지
+        않으면 **빈 파일에서 `lines[-1]`을 읽고 터진다** — 저널을 만들어놓고
+        아직 아무것도 안 쓴 순간이 정확히 그 상태다."""
+        from core.event import append_event
+
+        journal = tmp_path / "journal.jsonl"
+        journal.write_text("", encoding="utf-8")
+        sealed = append_event(journal, {"kind": "approved", "execution_id": "e1"})
+        assert sealed["integrity"]["previous_hash"] == "0" * 64
+
+    def test_a_record_without_an_integer_sequence_is_not_compared(self, tmp_path):
+        """순서 검사는 `sequence`가 정수일 때만 뜻이 있다. 문자열을 정수와
+        비교하면 터지고, **검증기가 터지는 것은 위반을 보고하는 것이 아니다.**"""
+        from core.export import verify_export
+
+        source = tmp_path / "export.jsonl"
+        source.write_text(
+            '{"sequence": "one", "integrity": {"event_hash": "x", "previous_hash": "y"}}\n',
+            encoding="utf-8")
+        report = verify_export(source)
+        assert report.records == 1
+        assert not any(v.kind == "sequence_regressed" for v in report.violations)
+
+    def test_a_blank_line_is_skipped_when_reconciling(self, tmp_path):
+        """`verify_export`의 빈 줄 건너뛰기는 테스트가 있었는데 **대조 쪽 사본은
+        없었다.** 같은 규칙을 두 곳에서 구현하면 두 곳 다 확인해야 한다 — 이
+        프로젝트가 반복해서 적어온 그대로다."""
+        from core.export import reconcile_with_ledger
+
+        source = tmp_path / "export.jsonl"
+        source.write_text('{"a": 1}\n\n{"b": 2}\n', encoding="utf-8")
+
+        class EmptyLedger:
+            def events(self, *args, **kwargs):
+                return []
+
+        assert not reconcile_with_ledger(source, EmptyLedger()).ok

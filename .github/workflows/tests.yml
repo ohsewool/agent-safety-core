@@ -66,7 +66,12 @@ jobs:
         # either gets a test or gets `# pragma: no cover` with a reason beside
         # it - and writing that reason is how the last one turned out to be
         # unreachable by construction (`BEGIN IMMEDIATE` holds the row).
+        #
+        # `--branch`, added a day later: a statement gate says every line ran,
+        # not that every `if` went both ways. Re-measuring found four arcs no
+        # test had taken, one of them "the journal file exists but is empty" -
+        # the state a journal is in between being created and first written.
         run: |
           pip install -q coverage
-          python -m coverage run --source=core,adapters -m pytest -q > /dev/null
+          python -m coverage run --branch --source=core,adapters -m pytest -q > /dev/null
           python -m coverage report -m --fail-under=100
