@@ -11,3 +11,7 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+
+# `ohsewool/tools/check_doc_tests_bite.py`가 문서를 비우기 전에 남기는 사본.
+# 도구가 SIGKILL로 죽으면 남는다 — 다음 실행이 되돌린다. 커밋될 일은 없어야 한다.
+*.bite-backup
