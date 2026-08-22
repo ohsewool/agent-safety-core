@@ -54,3 +54,19 @@ jobs:
 
       - name: Run the suite
         run: python -m pytest -q -rs   # -rs names every skip and why
+
+      - name: Refuse a line this suite never executes
+        # A coverage sweep on 2026-08-22 found 21 statements that no test ever
+        # ran - among them every failure path of `HttpWitness`, which is the
+        # witness this repository actually asks people to use, and two of the
+        # verdict names in `FreshnessReport`. None of it was visible: the suite
+        # was green and the count was growing.
+        #
+        # 100% is a gate here rather than a target. A new defensive branch
+        # either gets a test or gets `# pragma: no cover` with a reason beside
+        # it - and writing that reason is how the last one turned out to be
+        # unreachable by construction (`BEGIN IMMEDIATE` holds the row).
+        run: |
+          pip install -q coverage
+          python -m coverage run --source=core,adapters -m pytest -q > /dev/null
+          python -m coverage report -m --fail-under=100

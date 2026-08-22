@@ -382,7 +382,17 @@ class ExecutionLedger:
                 "UPDATE executions SET state=?, dispatcher_id=? WHERE execution_id=? AND state=?",
                 (DISPATCHING, self.dispatcher_id, execution_id, APPROVED),
             ).rowcount
-            if changed != 1:
+            if changed != 1:  # pragma: no cover - BEGIN IMMEDIATE holds the row
+                # Unreachable: the state was read as APPROVED a few lines above,
+                # inside this same `BEGIN IMMEDIATE` transaction, and the UPDATE
+                # re-asserts `state=APPROVED`. No other writer can move it in
+                # between - that is what the immediate write lock buys.
+                #
+                # Measured on 2026-08-22, when a coverage sweep left this as the
+                # single unexecuted line in the package. Kept rather than
+                # deleted: the compare-and-set is what makes the claim atomic,
+                # and reading it without its refusal branch would suggest the
+                # UPDATE is unconditional.
                 return None
             self._append_event(connection, execution_id, "lease_claimed", APPROVED, DISPATCHING,
                                {"lease_id": lease_id, "dispatcher_id": self.dispatcher_id})

@@ -43,7 +43,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 517 tests
+python3 -m pytest tests/ -q          # 547 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -103,6 +103,16 @@ charge(amount=9999, payee="m1", _lease=lease)    # LeaseRefused — 승인된 �
 v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITICAL 3건 — 승인 scope에 실행 컨텍스트가 없어 코드가 바뀌어도 통과, lease 검증과 소비가 원자적이지 않아 두 워커가 동시 통과, 저널과 lease 원장 사이에 트랜잭션 경계가 없어 "권한은 썼는데 증적이 없는" 상태 도달 가능 — 은 전부 "JSONL 저널이 진실"이라는 모델의 구조적 결함이었다.
 
 [`docs/ADR-002`](docs/ADR-002-execution-safety-state-model.md)가 그 재설계다: SQLite 트랜잭션 원장을 system of record로 삼고 해시 체인 저널을 export로 강등했다. `tests/test_ledger.py`가 각 finding을 닫으며, 그중 하나는 **24개 스레드가 같은 lease를 동시에 노려도 dispatch가 정확히 1회**임을 확인한다.
+
+### 그리고 21줄은 한 번도 실행되지 않았다
+
+거부 감사는 `raise`만 봤다. 질문을 넓혀 **한 번도 실행되지 않는 줄**을 셌더니 1,182줄 중 21줄이었다.
+
+**`HttpWitness`의 실패 처리 전부.** `FileWitness`는 자기 독스트링이 "감사받는 기계 위에 있으므로 아무것도 증언하지 않는다"고 적어둔 물건이고, 실제로 쓰라고 만든 것은 HTTP 쪽이다. 그런데 witness가 409·5xx·이상한 본문을 돌려줬을 때가 한 번도 돌지 않았다 — **감사받는 기계 밖에 두려고 만든 장치의 실패 처리가 검사 밖에 있었다.**
+
+**`FreshnessReport`의 판정 이름 둘과 요약의 OK 갈래.** "실패 차원을 각각 이름 붙여 보고한다"가 이 저장소의 문장인데 그 이름을 만드는 코드 일부가 돌지 않았다. **`rebind`의 url 갈래** — 승인과 dispatch 사이에 바뀐 것을 잡는 장치가 path에만 걸려 있었다. 그리고 **잘린 export를 원장과 대조하는 갈래**, **아직 없는 파일의 부모마저 없을 때**, **비밀이 리스트 안에 들어 있을 때**.
+
+지금은 100%이고, CI가 그것을 관문으로 지킨다. **관문이지 목표가 아니다** — 새 방어 분기는 테스트를 받거나 `# pragma: no cover`와 이유를 옆에 적는다. 마지막 한 줄이 그렇게 처리됐고, **이유를 적다가 그것이 구조적으로 도달 불가**라는 것이 드러났다(`BEGIN IMMEDIATE`가 그 행을 잡고 있다).
 
 ### 거부 일곱 개가 한 번도 발동한 적이 없었다
 
