@@ -43,7 +43,7 @@ benchmark/          결함 주입 ablation (A~E)
 ```
 
 ```bash
-python3 -m pytest tests/ -q          # 503 tests
+python3 -m pytest tests/ -q          # 517 tests
 python3 benchmark/run.py             # ablation 리포트
 python3 -m core.export verify <file> # 증적 검증
 ```
@@ -103,6 +103,14 @@ charge(amount=9999, payee="m1", _lease=lease)    # LeaseRefused — 승인된 �
 v0 설계는 적대적 검증에서 **NO(재설계)** 판정을 받았다. CRITICAL 3건 — 승인 scope에 실행 컨텍스트가 없어 코드가 바뀌어도 통과, lease 검증과 소비가 원자적이지 않아 두 워커가 동시 통과, 저널과 lease 원장 사이에 트랜잭션 경계가 없어 "권한은 썼는데 증적이 없는" 상태 도달 가능 — 은 전부 "JSONL 저널이 진실"이라는 모델의 구조적 결함이었다.
 
 [`docs/ADR-002`](docs/ADR-002-execution-safety-state-model.md)가 그 재설계다: SQLite 트랜잭션 원장을 system of record로 삼고 해시 체인 저널을 export로 강등했다. `tests/test_ledger.py`가 각 finding을 닫으며, 그중 하나는 **24개 스레드가 같은 lease를 동시에 노려도 dispatch가 정확히 1회**임을 확인한다.
+
+### 거부 일곱 개가 한 번도 발동한 적이 없었다
+
+문자열 메시지를 가진 `raise` **30개를 하나씩 `pass`로 바꾸고** 매번 스위트를 돌렸다. 잡힘 23, **안 잡힘 7**. 일곱은 지워도 전부 통과한다 — "표현할 수 없는 것은 거부한다"가 아니라 "거부한다고 적어뒀다"인 상태다.
+
+일곱 중 다섯은 안 써본 입력이다(Ed25519가 아닌 키 둘, 모르는 `execution_id` 둘, 빈 URL 하나). **나머지 둘이 이 감사의 값이다** — `assert_conforms`는 배포가 실제로 들고 온 witness를 검사하라고 있는 도구인데, 스위트는 올바른 구현만 넘겼다. **틀린 witness를 통과시키는 검사기**가 될 수 있었고 아무도 몰랐을 것이다. 지금은 멈춘 카운터·틀린 digest·두 번째 발행 뒤 정체를 각각 넘겨 잡히는 것을 확인한다.
+
+일곱을 하나씩 다시 지워 **7/7 전부 잡히는 것**을 재봤다.
 
 ## 권한 분리 (`core/access.py`)
 
