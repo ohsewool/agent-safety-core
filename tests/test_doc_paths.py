@@ -35,7 +35,25 @@ SKIP_DIRECTORIES = {".git", "node_modules", "__pycache__", "archive"}
 LINK = re.compile(r"\[[^\]]*\]\((?!https?:|#|mailto:)([^)\s]+)\)")
 EXTENSIONS = "py|md|toml|yml|yaml|json|jsonl|csv|part|txt|cfg|sh|js|css|pkl|db"
 BACKTICK = re.compile(rf"`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.(?:{EXTENSIONS}))`")
-HISTORICAL = re.compile(r"<!--\s*historical:")
+# **선언**과 **언급**은 다르다.
+#
+# 예전 정규식은 `<!--\s*historical:`을 파일 어디에서든 찾았다. 그래서 이 관례를
+# **설명하는 문장**이 있는 문서가 통째로 면제됐다. `modelmate`에서 실제로 그 일이
+# 벌어졌다(2026-08-22): README 349줄의 "…은 각자 `<!-- historical: -->`로 선언돼
+# 있다"는 한 문장이 **가장 많이 읽히는 문서를 모든 검사에서 빼버렸고**, 두 회차
+# 동안 아무도 몰랐다. 다시 넣자마자 가려져 있던 죽은 링크 둘이 나왔다.
+#
+# 여기 문서들은 지금 그 상태가 아니다 — 재봤고, 언급만으로 면제된 문서는 없다.
+# 장치가 같으므로 미리 고친다. 진짜 선언은 **줄 시작에, 문서 앞쪽에** 있다.
+HISTORICAL = re.compile(r"^\s*<!--\s*historical:", re.MULTILINE)
+DECLARATION_WITHIN_LINES = 15
+
+
+def declared_historical(text: str) -> bool:
+    """문서 앞쪽에 줄 시작으로 놓인 선언만 인정한다."""
+    head = "\n".join(text.splitlines()[:DECLARATION_WITHIN_LINES])
+    return bool(HISTORICAL.search(head))
+
 
 
 def documents():
@@ -72,6 +90,24 @@ def documents():
     return found
 
 
+# **무엇이 면제됐는지 이름으로 둔다.**
+#
+# 지금까지 이 검사들의 공허 가드는 **하한선**이었다(`>= 3`, `>= 20`). 하한선은
+# 문서 하나가 조용히 빠지는 것을 잡지 못한다 — `modelmate`에서 README가 산문 한
+# 줄로 면제됐을 때 살아 있는 문서 수는 21에서 20으로 줄었고, 가드는 `>= 20`이었다.
+# **두 회차 동안 초록불이었다.**
+#
+# 면제는 드물고 의도적이다. 그러니 목록으로 적어둘 수 있고, 적어두면 늘어나는
+# 것도 줄어드는 것도 걸린다. 진짜 기록을 새로 선언하면 여기 한 줄 추가하는 것이
+# **그 면제를 의도했다는 증거**다.
+DECLARED_RECORDS = frozenset({})
+
+
+def declared_documents() -> set:
+    return {path for path in documents()
+            if declared_historical(path.read_text(encoding="utf-8", errors="replace"))}
+
+
 def references(text):
     for pattern in (LINK, BACKTICK):
         for match in pattern.finditer(text):
@@ -82,7 +118,7 @@ def references(text):
 
 def missing_in(path):
     text = path.read_text(encoding="utf-8", errors="replace")
-    if HISTORICAL.search(text):
+    if declared_historical(text):
         return []
     return [reference for reference in dict.fromkeys(references(text))
             if not (ROOT / reference).exists() and not (path.parent / reference).exists()]
@@ -145,3 +181,16 @@ class TestTheCheckIsNotVacuous:
         doc = tmp_path / "d.md"
         doc.write_text("[readme](README.md)", encoding="utf-8")
         assert missing_in(doc) == []
+
+
+def test_no_document_is_exempt():
+    """이 저장소에는 기록으로 선언된 문서가 없다. **비어 있음도 결과다** —
+    어떤 문서가 조용히 검사 밖으로 나가면 여기서 걸린다. 하한선 가드로는
+    보이지 않는 변화다(`modelmate`에서 README가 그렇게 빠졌다).
+    """
+    actual = {str(path.relative_to(ROOT)) for path in declared_documents()}
+    assert actual == set(DECLARED_RECORDS), (
+        f"면제된 문서가 생겼다: {sorted(actual)}\n"
+        "의도한 기록이면 DECLARED_RECORDS에 넣어라. 아니면 산문 언급이 선언으로 "
+        "읽힌 것이다."
+    )
