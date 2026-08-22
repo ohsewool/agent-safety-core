@@ -165,11 +165,19 @@ class RetentionSchedule:
             eligible_at, due_at,
         )
 
-    def sweep(self, payloads: Iterable[Mapping[str, Any]]) -> tuple[RetentionDecision, ...]:
+    def sweep(self, payloads: Iterable[Mapping[str, Any]],
+              *, now: float | None = None) -> tuple[RetentionDecision, ...]:
         """Decide for many payloads. Returns decisions; destroys nothing.
 
         Deliberately not a deleter. A sweep that deleted would make destruction a
         background job, and destruction is an act that needs an actor in the log.
+
+        `created_at` arrives from the caller, so `now` should too. Without it this
+        compares someone else's timestamps against this schedule's own clock, and
+        the two have no relationship. `destroy` had the same hole and it failed
+        open: a payload under a **ten-year** class was reported `eligible` the
+        moment it was written, because a `created_at` of 1000.0 sits far behind
+        wall time. Measured 2026-08-22, here and in `PayloadStore.destroy`.
         """
         return tuple(
             self.decide(
@@ -177,6 +185,7 @@ class RetentionSchedule:
                 retention_class=item.get("retention_class", "standard"),
                 created_at=item["created_at"],
                 on_hold=bool(item.get("on_hold")),
+                now=now,
             )
             for item in payloads
         )
@@ -191,9 +200,11 @@ class RetentionSchedule:
             raise RetentionError(f"{payload_id} may not be destroyed: {decision.reason}")
         return decision
 
-    def overdue(self, payloads: Iterable[Mapping[str, Any]]) -> tuple[RetentionDecision, ...]:
+    def overdue(self, payloads: Iterable[Mapping[str, Any]],
+                *, now: float | None = None) -> tuple[RetentionDecision, ...]:
         """Payloads kept past their maximum — the failure a schedule should surface."""
-        return tuple(item for item in self.sweep(payloads) if item.action == "overdue")
+        return tuple(item for item in self.sweep(payloads, now=now)
+                     if item.action == "overdue")
 
     def describe(self) -> list[dict[str, Any]]:
         """The schedule as a reviewer sees it."""

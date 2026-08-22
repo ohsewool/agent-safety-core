@@ -74,6 +74,64 @@ class TestTheStoresClockDecides:
         assert store.destroy(reference, requester="operator-1", reason="기한 뒤")
 
 
+class TestSweepTakesTheCallersClockToo:
+    """`destroy`만 고치면 절반이다. `pending_retention()`이 만드는 것이 정확히
+    `sweep()`의 입력이라, **의도된 사용법 자체가 두 시계를 섞는다**:
+
+        schedule.sweep(store.pending_retention())
+
+    `created_at`은 store에서, `now`는 schedule에서 온다. 10년 보존 payload가
+    쓰이자마자 `eligible`로 나온다.
+    """
+
+    def test_sweep_accepts_a_now(self, tmp_path):
+        schedule = RetentionSchedule(
+            (RetentionClass("standard", 3650.0, "10년 보존"),))
+        payloads = [{"payload_id": "p1", "retention_class": "standard",
+                     "created_at": 1000.0}]
+        assert schedule.sweep(payloads, now=1000.0)[0].action == "keep"
+
+    def test_without_now_it_still_reads_its_own_clock(self, tmp_path):
+        """기본 동작은 그대로다 — 기존 호출자를 깨뜨리지 않는다."""
+        schedule = RetentionSchedule(
+            (RetentionClass("standard", 0.0, "보존 없음"),))
+        payloads = [{"payload_id": "p1", "retention_class": "standard",
+                     "created_at": 0.0}]
+        assert schedule.sweep(payloads)[0].action == "eligible"
+
+    def test_overdue_threads_it_as_well(self):
+        """`overdue`는 `sweep`을 부른다. 한쪽만 고치면 다른 쪽으로 같은 구멍이 남는다."""
+        schedule = RetentionSchedule(
+            (RetentionClass("capped", 0.0, "짧게", maximum_days=1.0),))
+        payloads = [{"payload_id": "p1", "retention_class": "capped",
+                     "created_at": 1000.0}]
+        assert schedule.overdue(payloads, now=1000.0) == ()
+        assert len(schedule.overdue(payloads, now=1000.0 + 86400 * 2)) == 1
+
+    def test_the_store_offers_the_call_that_cannot_be_got_wrong(self, tmp_path):
+        clock = Clock()
+        store = store_with(tmp_path / "s", minimum_days=3650.0, store_clock=clock)
+        store.put({"secret": "x"}, retention_class="standard")
+        assert store.retention_status()[0].action == "keep"
+        clock.now += 3650 * 86400 + 1
+        assert store.retention_status()[0].action == "eligible"
+
+    def test_the_easy_wrong_call_is_still_possible_and_that_is_why_the_method_exists(
+            self, tmp_path):
+        """손으로 `now`를 넘기는 것도 되지만 **기억해야 한다**. 기억에 기대는 통제가
+        잊히는 통제다 — 그래서 시계를 가진 쪽이 부르는 길을 뒀다."""
+        clock = Clock()
+        store = store_with(tmp_path / "t", minimum_days=3650.0, store_clock=clock)
+        store.put({"secret": "x"}, retention_class="standard")
+        assert store._schedule.sweep(store.pending_retention())[0].action == "eligible"
+
+    def test_a_store_without_a_schedule_says_so(self, tmp_path):
+        """조용히 빈 결과를 주면 "보존 대상 없음"으로 읽힌다."""
+        store = PayloadStore(tmp_path / "u")
+        with pytest.raises(Exception, match="no retention schedule"):
+            store.retention_status()
+
+
 class TestWithoutAScheduleNothingChanges:
     """schedule이 없으면 예전처럼 동작한다 — 보존을 **명시적 선택**으로 두는 설계다."""
 

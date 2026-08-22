@@ -223,8 +223,35 @@ class PayloadStore:
             "reason": reason,
         }
 
+    def retention_status(self, schedule: Any = None) -> tuple[Any, ...]:
+        """This store's payloads, judged by a schedule **on this store's clock**.
+
+        `pending_retention()` produces what `RetentionSchedule.sweep()` needs, so
+        the obvious call is `schedule.sweep(store.pending_retention())` - and that
+        call mixes two clocks. `created_at` comes from here; `now` would come from
+        the schedule. A payload under a ten-year class was reported `eligible` the
+        moment it was written, because a `created_at` of 1000.0 sits far behind
+        wall time (measured 2026-08-22).
+
+        The fix for `destroy` was the same: the object holding the clock makes the
+        call. Passing `now` by hand works too, but it requires remembering, and a
+        control that depends on remembering is the one that gets forgotten.
+        """
+        chosen = schedule if schedule is not None else self._schedule
+        if chosen is None:
+            raise PayloadError(
+                "no retention schedule: this store was built without one and none "
+                "was passed. Without a schedule there is nothing to judge against."
+            )
+        return chosen.sweep(self.pending_retention(), now=self._clock())
+
     def pending_retention(self) -> list[dict[str, Any]]:
-        """What a sweep needs: every live payload with its class and age."""
+        """What a sweep needs: every live payload with its class and age.
+
+        Feeding this straight to `sweep()` compares these timestamps against the
+        schedule's own clock. Use `retention_status()` unless you are passing
+        `now=` yourself.
+        """
         return [
             {"payload_id": payload_id,
              "retention_class": self._retention.get(payload_id, "standard"),

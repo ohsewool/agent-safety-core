@@ -98,6 +98,13 @@ untrusted 입력은 파싱 단계에서 다음을 강제한다.
   둘 다 `time.time()`이라 일치하므로, 이 실패는 **시간을 통제하는 곳에서만** 나타난다 —
   테스트·재현·시계를 고정한 배포, 즉 보존 통제를 실제로 시험하는 자리다. `destroy`가
   이제 `now=self._clock()`을 넘겨 `created_at`을 만든 시계가 판단도 한다.
+- **`sweep`·`overdue`도 같은 시계로**(2026-08-22 추가): `destroy`만 고치면 절반이다.
+  `PayloadStore.pending_retention()`이 만드는 것이 정확히 `RetentionSchedule.sweep()`의
+  입력이라 **의도된 사용법 자체가 두 시계를 섞는다** —
+  `schedule.sweep(store.pending_retention())`에서 `created_at`은 store에서, `now`는
+  schedule에서 온다. 10년 보존 payload가 쓰이자마자 `eligible`로 나왔다. 둘 다 `now=`를
+  받게 하고, **시계를 가진 쪽이 부르는 길**(`PayloadStore.retention_status()`)을 뒀다 —
+  손으로 넘기는 것도 되지만 기억해야 하고, 기억에 기대는 통제가 잊히는 통제다.
 - **거절도 기록한다**(2026-08-22 추가): `approve`와 `reconcile`의 거절은 아무 이벤트도
   남기지 않았다. `_transaction`이 예외에 ROLLBACK하는데 두 함수는 `raise`로 빠져나가
   이벤트가 거절과 함께 사라졌기 때문이다 — `claim_lease`는 `return None`으로 빠져나가
